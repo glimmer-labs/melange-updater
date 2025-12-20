@@ -26,10 +26,6 @@ inputs:
     description: 'Author email to commit.'
     required: true
     default: ''
-  use-gitsign:
-    description: 'Whether to attempt signed commits.'
-    required: false
-    default: 'false'
   github-labels:
     description: 'Comma-separated labels to add to created PR.'
     required: false

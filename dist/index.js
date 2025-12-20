@@ -56236,6 +56236,7 @@ async function main() {
   const absRepoPath = path.resolve(process.cwd(), repoPath);
   console.log('Repository path:', absRepoPath);
 
+
   // Discover melange packages
   const packages = findMelangePackages(absRepoPath);
   console.log('Found', Object.keys(packages).length, 'candidate melange packages');
