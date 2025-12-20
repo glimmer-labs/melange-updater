@@ -1,7 +1,13 @@
 Melange Updater
 =========================
 
-Node.js 24 implementation of the deprecated Go `wolfictl update`. It scans melange YAML packages, discovers newer versions from Release Monitor and GitHub (releases/tags, with git tag fallback), applies version transforms/filters, and opens one PR per package update. Manual-flagged packages are reported but not auto-applied.
+JavaScript GitHub Action (Node 24) that reimplements the deprecated Go `wolfictl update`. It updates melange YAML packages by discovering newer versions from Release Monitor, GitHub releases/tags (with git tag fallback), applying transforms/filters, and opening one PR per package. Manual-flagged packages are reported but not auto-applied.
+
+Requirements
+- In the repository/org settings, enable “Allow GitHub Actions to create and approve pull requests.”
+- Workflow permissions: `contents: write`, `pull-requests: write`, `issues: write`.
+- Token: `GITHUB_TOKEN` with the above perms (or a PAT with `repo` scope if running from forks/restricted contexts).
+- Runner tooling: `git` available; `gitsign` available or installable via apt if `use-gitsign: true`.
 
 What it does
 - Finds melange package YAMLs (`package` + `update` blocks)
@@ -12,13 +18,14 @@ What it does
 - Supports preview/no-commit (apply locally only) and dry-run (report only)
 - Optional commit signing via `gitsign`; when `use-gitsign: true`, commits/tags are signed so GitHub shows them as Verified
 
-Inputs (composite action `./.github/action/wolfictl-update`)
+Inputs (JavaScript action)
 - `repository` (required): target repo `owner/repo`
 - `token` (required): GitHub token with repo push/PR rights
 - `release_monitor_token` (optional): token for Release Monitor
 - `git_author_name` / `git_author_email` (required): author info for commits
 - `use-gitsign` (optional): `true` to sign commits/tags with gitsign (Verified on GitHub)
 - `github-labels` (optional): comma-separated labels for created PRs
+- `repo-path` (optional): path to the checked-out repository; defaults to `GITHUB_WORKSPACE`
 
 Behavior
 - Single run may create multiple PRs (one per non-manual package needing update)
@@ -32,24 +39,24 @@ jobs:
 	update:
 		runs-on: ubuntu-latest
 		permissions:
+			issues: write        # open issues on failures
 			contents: write      # create branches/commits
 			pull-requests: write # open PRs
-			issues: write        # open issues on failures
 		steps:
-			- uses: glimmer-labs/wolfi/.github/action/wolfictl-update@main
+			- uses: glimmer-labs/melange-updater@v1
 				with:
-					repository: your-org/your-repo
+					repository: ${{ github.repository }}
 					token: ${{ secrets.GITHUB_TOKEN }}
 					release_monitor_token: ${{ secrets.RELEASE_MONITOR_TOKEN }} # optional
 					git_author_name: CI Bot
 					git_author_email: ci@example.com
-					use-gitsign: 'false' # set to 'true' to sign commits/tags (Verified)
+					use-gitsign: false # set to 'true' to sign commits/tags (Verified)
 					github-labels: 'request-version-update,automated pr'
 ```
 
-Usage: local testing
+Usage: local testing (direct CLI)
 ```bash
-cd .github/action/wolfictl-update
+cd melange-updater
 npm ci
 node src/index.js \
 	--target-repo your-org/your-repo \
@@ -64,4 +71,4 @@ node src/index.js \
 Notes
 - Preview mode applies changes locally without branch/commit/push/PR; dry-run prints planned updates only.
 - One PR per package keeps changes isolated; branches are named `wolfictl-update-<pkg>-<timestamp>`.
-- `use-gitsign: true` signs commits/tags with gitsign so GitHub marks them Verified.
+- If PR creation is blocked, ensure repo/org setting “Allow GitHub Actions to create and approve pull requests” is enabled and the token has `pull-requests: write`.
