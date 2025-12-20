@@ -1,6 +1,5 @@
 import { execSync, ExecSyncOptions } from 'child_process';
 import * as core from '@actions/core';
-import fs from 'fs';
 import { UpdateEntry, UpdateMap } from '../types';
 
 export function run(cmd: string, opts: ExecSyncOptions = {}): void {
@@ -59,16 +58,6 @@ export async function writeSummary({ mode, updates = {}, createdPRs = [], manual
   // Skip when running outside of GitHub Actions where GITHUB_STEP_SUMMARY is missing.
   if (!core || !core.summary || !process.env.GITHUB_STEP_SUMMARY) return;
   if (summaryWritten) return;
-
-  const summaryFile = process.env.GITHUB_STEP_SUMMARY;
-  if (summaryFile && fs.existsSync(summaryFile)) {
-    try {
-      const existing = fs.readFileSync(summaryFile, 'utf8');
-      if (existing.includes(SUMMARY_MARKER)) return;
-    } catch (_) {
-      // ignore read errors
-    }
-  }
   const s = core.summary;
   const updateEntries = Object.entries(updates || {});
 
@@ -112,7 +101,8 @@ export async function writeSummary({ mode, updates = {}, createdPRs = [], manual
     s.addList(packageErrors.map((e) => `${e.name} (${e.phase}): ${e.message}`));
   }
 
-  await s.write();
+  // Overwrite to avoid duplicated blocks if previous content exists.
+  await s.write({ overwrite: true });
   summaryWritten = true;
 }
 

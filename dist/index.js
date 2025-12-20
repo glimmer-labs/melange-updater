@@ -33390,9 +33390,6 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 exports.execGetOutput = execGetOutput;
@@ -33404,7 +33401,6 @@ exports.writeSummary = writeSummary;
 exports.ensureCleanWorkingTree = ensureCleanWorkingTree;
 const child_process_1 = __nccwpck_require__(5317);
 const core = __importStar(__nccwpck_require__(7484));
-const fs_1 = __importDefault(__nccwpck_require__(9896));
 function run(cmd, opts = {}) {
     console.log('>', cmd);
     (0, child_process_1.execSync)(cmd, { stdio: 'inherit', ...opts });
@@ -33450,17 +33446,6 @@ async function writeSummary({ mode, updates = {}, createdPRs = [], manualUpdates
         return;
     if (summaryWritten)
         return;
-    const summaryFile = process.env.GITHUB_STEP_SUMMARY;
-    if (summaryFile && fs_1.default.existsSync(summaryFile)) {
-        try {
-            const existing = fs_1.default.readFileSync(summaryFile, 'utf8');
-            if (existing.includes(SUMMARY_MARKER))
-                return;
-        }
-        catch (_) {
-            // ignore read errors
-        }
-    }
     const s = core.summary;
     const updateEntries = Object.entries(updates || {});
     s.clear();
@@ -33499,7 +33484,8 @@ async function writeSummary({ mode, updates = {}, createdPRs = [], manualUpdates
         s.addHeading('Errors');
         s.addList(packageErrors.map((e) => `${e.name} (${e.phase}): ${e.message}`));
     }
-    await s.write();
+    // Overwrite to avoid duplicated blocks if previous content exists.
+    await s.write({ overwrite: true });
     summaryWritten = true;
 }
 function ensureCleanWorkingTree(cwd, execGetOutputFn) {
