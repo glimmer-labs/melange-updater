@@ -36155,6 +36155,62 @@ module.exports = {
 
 /***/ }),
 
+/***/ 2410:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const core = __nccwpck_require__(7484);
+const { execSync } = __nccwpck_require__(5317);
+
+function resolveRemoteRef(repoUrl, ref) {
+  if (!repoUrl || !ref) return '';
+  try {
+    const output = execSync(`git ls-remote ${repoUrl} ${ref}`, { encoding: 'utf8' });
+    const lines = output.trim().split(/\r?\n/);
+    if (!lines.length || !lines[0]) return '';
+    const [sha] = lines[0].split(/\s+/);
+    return sha || '';
+  } catch (err) {
+    core.warning(`Failed to resolve ref ${ref} from ${repoUrl}: ${err.message}`);
+    return '';
+  }
+}
+
+function resolveBranchHead(repoUrl, branch) {
+  return resolveRemoteRef(repoUrl, `refs/heads/${branch}`);
+}
+
+function resolveTagCommit(repoUrl, tag) {
+  return resolveRemoteRef(repoUrl, `refs/tags/${tag}^{}`);
+}
+
+async function resolveExpectedCommit({ source, tag, repoUrl, branch, owner, repo, octo, packageName }) {
+  let commitSha = '';
+
+  if (source === 'github' && tag && owner && repo) {
+    try {
+      const ref = await octo.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
+      commitSha = ref?.data?.object?.sha || '';
+    } catch (err) {
+      const fallbackRepo = `https://github.com/${owner}/${repo}.git`;
+      commitSha = resolveTagCommit(fallbackRepo, tag);
+      if (!commitSha) {
+        core.warning(`${packageName}: failed to resolve commit for GitHub tag ${tag}: ${err.message}`);
+      }
+    }
+  } else if (source === 'git' && repoUrl && tag) {
+    commitSha = resolveTagCommit(repoUrl, tag);
+  } else if (source === 'release-monitor' && repoUrl && branch) {
+    commitSha = resolveBranchHead(repoUrl, branch);
+  }
+
+  return commitSha;
+}
+
+module.exports = { resolveBranchHead, resolveTagCommit, resolveExpectedCommit };
+
+
+/***/ }),
+
 /***/ 8720:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -36280,6 +36336,60 @@ function writeMelangePackage(pkg) {
   fs.writeFileSync(pkg.file, yamlStr, 'utf8');
 }
 
+function updateExpectedCommitInFile(filePath, commitSha) {
+  if (!commitSha) return false;
+  const raw = fs.readFileSync(filePath, 'utf8');
+  const lines = raw.split(/\r?\n/);
+  let changed = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const usesMatch = lines[i].match(/^(\s*)-\s+uses:\s+git-checkout/);
+    if (!usesMatch) continue;
+    const baseIndent = usesMatch[1] || '';
+    let withIndent = '';
+    let branchLine = -1;
+    let expectedLine = -1;
+    let insertPos = -1;
+
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j];
+      if (!line.trim()) continue;
+      if (/^(\s*)-\s+uses:/.test(line) && (RegExp.$1 || '').length <= baseIndent.length) break;
+
+      const withMatch = line.match(/^(\s*)with:\s*$/);
+      if (withMatch) {
+        withIndent = withMatch[1] + '  ';
+        insertPos = j + 1;
+        continue;
+      }
+
+      if (withIndent) {
+        if (line.includes('expected-commit:')) {
+          expectedLine = j;
+          break;
+        }
+        if (line.includes('branch:')) branchLine = j;
+        insertPos = j + 1;
+      }
+    }
+
+    if (expectedLine >= 0) {
+      const indent = (lines[expectedLine].match(/^\s*/) || [''])[0];
+      lines[expectedLine] = `${indent}expected-commit: ${commitSha}`;
+      changed = true;
+    } else if (withIndent) {
+      const idx = branchLine >= 0 ? branchLine + 1 : insertPos >= 0 ? insertPos : i + 1;
+      lines.splice(idx, 0, `${withIndent}expected-commit: ${commitSha}`);
+      changed = true;
+    }
+    break;
+  }
+
+  if (!changed) return false;
+  fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
+  return true;
+}
+
 function updatePackageVersionInFile(filePath, newVersion) {
   const raw = fs.readFileSync(filePath, 'utf8');
   const lines = raw.split(/\r?\n/);
@@ -36309,7 +36419,67 @@ function updatePackageVersionInFile(filePath, newVersion) {
   return true;
 }
 
-module.exports = { findMelangePackages, writeMelangePackage, updatePackageVersionInFile };
+function updatePackageEpochInFile(filePath, newEpoch = 0) {
+  const raw = fs.readFileSync(filePath, 'utf8');
+  const lines = raw.split(/\r?\n/);
+  let changed = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (/^package:\s*$/.test(lines[i].trim())) {
+      for (let j = i + 1; j < lines.length; j++) {
+        const line = lines[j];
+        if (/^\S/.test(line)) break;
+        const m = line.match(/^(\s+)epoch:\s*(.*)$/);
+        if (m) {
+          const indent = m[1];
+          const current = m[2].trim();
+          if (current !== String(newEpoch)) {
+            lines[j] = `${indent}epoch: ${newEpoch}`;
+            changed = true;
+          }
+          break;
+        }
+      }
+      break;
+    }
+  }
+
+  if (!changed) return false;
+  fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
+  return true;
+}
+
+module.exports = { findMelangePackages, writeMelangePackage, updatePackageVersionInFile, updatePackageEpochInFile, updateExpectedCommitInFile };
+
+
+/***/ }),
+
+/***/ 7419:
+/***/ ((module) => {
+
+function getGitRepoFromPipeline(pkgDoc) {
+  const pipeline = pkgDoc && pkgDoc.pipeline;
+  if (!Array.isArray(pipeline)) return '';
+  for (const step of pipeline) {
+    if (step && step.uses === 'git-checkout' && step.with && step.with.repository) {
+      return step.with.repository;
+    }
+  }
+  return '';
+}
+
+function getGitBranchFromPipeline(pkgDoc) {
+  const pipeline = pkgDoc && pkgDoc.pipeline;
+  if (!Array.isArray(pipeline)) return '';
+  for (const step of pipeline) {
+    if (step && step.uses === 'git-checkout' && step.with && step.with.branch) {
+      return step.with.branch;
+    }
+  }
+  return '';
+}
+
+module.exports = { getGitRepoFromPipeline, getGitBranchFromPipeline };
 
 
 /***/ }),
@@ -56151,7 +56321,9 @@ const { Octokit } = __nccwpck_require__(9380);
 const { getLatestReleaseVersion } = __nccwpck_require__(8792);
 const { getLatestGithubRelease } = __nccwpck_require__(9360);
 const { getLatestGitTag } = __nccwpck_require__(8720);
-const { findMelangePackages, writeMelangePackage, updatePackageVersionInFile } = __nccwpck_require__(4776);
+const { findMelangePackages, writeMelangePackage, updatePackageVersionInFile, updatePackageEpochInFile, updateExpectedCommitInFile } = __nccwpck_require__(4776);
+const { getGitRepoFromPipeline, getGitBranchFromPipeline } = __nccwpck_require__(7419);
+const { resolveExpectedCommit } = __nccwpck_require__(2410);
 const { applyTransforms, shouldIgnoreVersion } = __nccwpck_require__(437);
 const semver = __nccwpck_require__(2088);
 
@@ -56177,18 +56349,21 @@ function sanitizeName(name) {
 }
 
 function applyVersionToPackage(pkg, newVersion) {
-  // First try targeted in-place replacement to preserve formatting
-  const replaced = updatePackageVersionInFile(pkg.file, newVersion);
-  if (replaced) return true;
+  // Try targeted in-place replacement to preserve formatting
+  const versionUpdated = updatePackageVersionInFile(pkg.file, newVersion);
+  const epochUpdated = updatePackageEpochInFile(pkg.file, 0);
+  if (versionUpdated || epochUpdated) return true;
 
-  // Fallback to full YAML write if pattern not found
+  // Fallback to full YAML write if patterns not found
   if (pkg.doc.package && pkg.doc.package.version) {
     pkg.doc.package.version = newVersion;
+    if (typeof pkg.doc.package.epoch !== 'undefined') pkg.doc.package.epoch = 0;
     writeMelangePackage(pkg);
     return true;
   }
   if (pkg.doc.Package && pkg.doc.Package.version) {
     pkg.doc.Package.version = newVersion;
+    if (typeof pkg.doc.Package.epoch !== 'undefined') pkg.doc.Package.epoch = 0;
     writeMelangePackage(pkg);
     return true;
   }
@@ -56272,17 +56447,6 @@ async function main() {
     return true;
   }
 
-  function getGitRepoFromPipeline(pkgDoc) {
-    const pipeline = pkgDoc && pkgDoc.pipeline;
-    if (!Array.isArray(pipeline)) return '';
-    for (const step of pipeline) {
-      if (step && step.uses === 'git-checkout' && step.with && step.with.repository) {
-        return step.with.repository;
-      }
-    }
-    return '';
-  }
-
   for (const [name, pkg] of Object.entries(packages)) {
     try {
       const updateCfgRaw = pkg.doc.update || {};
@@ -56296,6 +56460,12 @@ async function main() {
       const isManual = updateCfg.manual === true;
 
       let latest = '';
+      let latestSource = '';
+      let tagForCommit = '';
+      let repoUrlForCommit = '';
+      let branchForCommit = '';
+      let githubOwner = '';
+      let githubRepoName = '';
       if (updateCfg.release_monitor && updateCfg.release_monitor.identifier) {
         const id = updateCfg.release_monitor.identifier;
         console.log(`${name}: querying release-monitor id ${id}`);
@@ -56304,6 +56474,9 @@ async function main() {
           version_filter_prefix: updateCfg.release_monitor.version_filter_prefix,
           version_filter_contains: updateCfg.release_monitor.version_filter_contains,
         });
+        latestSource = 'release-monitor';
+        repoUrlForCommit = (updateCfg.git && updateCfg.git.repository) || getGitRepoFromPipeline(pkg.doc);
+        branchForCommit = (updateCfg.git && updateCfg.git.branch) || getGitBranchFromPipeline(pkg.doc);
       }
 
       // GitHub config uses `identifier: org/repo` in melange YAML
@@ -56316,6 +56489,12 @@ async function main() {
             tag_filter_prefix: updateCfg.github.tag_filter_prefix,
             tag_filter_contains: updateCfg.github.tag_filter_contains || updateCfg.github.tag_filter, // legacy
           });
+          if (latest) {
+            latestSource = 'github';
+            tagForCommit = latest;
+            githubOwner = owner;
+            githubRepoName = repo;
+          }
         }
       }
 
@@ -56329,6 +56508,12 @@ async function main() {
               tag_filter_prefix: updateCfg.git.tag_filter_prefix,
               tag_filter_contains: updateCfg.git.tag_filter_contains,
             });
+            if (latest) {
+              latestSource = 'git';
+              repoUrlForCommit = repoUrl;
+              tagForCommit = latest;
+              branchForCommit = updateCfg.git.branch || getGitBranchFromPipeline(pkg.doc) || '';
+            }
           } catch (e) {
             console.warn(`${name}: failed to query git tags: ${e.message}`);
           }
@@ -56367,7 +56552,20 @@ async function main() {
 
       if (shouldUpdate) {
         console.log(`${name}: will update ${currentVersion} -> ${transformed}${isManual ? ' (manual)' : ''}`);
-        updates[name] = { from: currentVersion, to: transformed, file: pkg.file, manual: isManual };
+        let commitSha = '';
+        if (!isManual) {
+          commitSha = await resolveExpectedCommit({
+            source: latestSource,
+            tag: tagForCommit,
+            repoUrl: repoUrlForCommit,
+            branch: branchForCommit,
+            owner: githubOwner,
+            repo: githubRepoName,
+            octo,
+            packageName: name,
+          });
+        }
+        updates[name] = { from: currentVersion, to: transformed, file: pkg.file, manual: isManual, commit: commitSha };
         // do not write files yet; we'll apply changes only if there are updates and not in dry-run
       }
     } catch (e) {
@@ -56400,6 +56598,9 @@ async function main() {
       const pkg = packages[name];
       if (!pkg) continue;
       applyVersionToPackage(pkg, u.to);
+      if (u.commit) {
+        updateExpectedCommitInFile(pkg.file, u.commit);
+      }
     }
     console.log('Preview mode: updates applied locally; no branch/commit/push/PR.');
     return;
@@ -56440,6 +56641,9 @@ async function main() {
 
       // Apply the update to the working tree
       applyVersionToPackage(pkg, u.to);
+      if (u.commit) {
+        updateExpectedCommitInFile(pkg.file, u.commit);
+      }
 
       const safeName = sanitizeName(name);
       const branch = `melange-update-${safeName}-${Date.now()}`;
