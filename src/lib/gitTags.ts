@@ -1,7 +1,14 @@
-const { execSync } = require('child_process');
-const semver = require('semver');
+import { execSync } from 'child_process';
+import semver from 'semver';
 
-function listRemoteTags(repoUrl) {
+interface TagOptions {
+  tag_filter_prefix?: string;
+  tagFilterPrefix?: string;
+  tag_filter_contains?: string;
+  tagFilterContains?: string;
+}
+
+function listRemoteTags(repoUrl: string): string[] {
   const out = execSync(`git ls-remote --tags ${repoUrl}`, { encoding: 'utf8' });
   return out
     .split('\n')
@@ -16,7 +23,7 @@ function listRemoteTags(repoUrl) {
     .filter(Boolean);
 }
 
-function pickLatestTag(tags, opts = {}) {
+function pickLatestTag(tags: string[], opts: TagOptions = {}): string {
   const prefix = opts.tag_filter_prefix || opts.tagFilterPrefix;
   const contains = opts.tag_filter_contains || opts.tagFilterContains;
   let filtered = tags;
@@ -25,7 +32,7 @@ function pickLatestTag(tags, opts = {}) {
   if (filtered.length === 0) return '';
   const semverCandidates = filtered
     .map((t) => ({ tag: t, v: semver.coerce(t) }))
-    .filter((x) => x.v);
+    .filter((x): x is { tag: string; v: semver.SemVer } => Boolean(x.v));
   if (semverCandidates.length > 0) {
     semverCandidates.sort((a, b) => semver.rcompare(a.v, b.v));
     return semverCandidates[0].tag;
@@ -33,9 +40,7 @@ function pickLatestTag(tags, opts = {}) {
   return filtered[0];
 }
 
-function getLatestGitTag(repoUrl, opts = {}) {
+export function getLatestGitTag(repoUrl: string, opts: TagOptions = {}): string {
   const tags = listRemoteTags(repoUrl);
   return pickLatestTag(tags, opts);
 }
-
-module.exports = { getLatestGitTag };

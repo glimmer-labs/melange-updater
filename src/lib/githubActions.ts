@@ -1,6 +1,16 @@
-const core = require('@actions/core');
+import * as core from '@actions/core';
+import { Octokit } from '@octokit/rest';
 
-async function createIssueForPackage({ octo, targetRepo, token, pkgName, message, phase }) {
+interface CreateIssueParams {
+  octo: Octokit;
+  targetRepo: string;
+  token?: string;
+  pkgName: string;
+  message: string;
+  phase?: string;
+}
+
+export async function createIssueForPackage({ octo, targetRepo, token, pkgName, message, phase }: CreateIssueParams): Promise<unknown> {
   if (!token) {
     console.warn(`Cannot create issue for ${pkgName} (${phase}): no token available.`);
     return null;
@@ -13,7 +23,7 @@ async function createIssueForPackage({ octo, targetRepo, token, pkgName, message
     console.log(`Created issue for ${pkgName}: ${title}`);
     return issue;
   } catch (e) {
-    const msg = e && e.message ? e.message : String(e);
+    const msg = e instanceof Error ? e.message : String(e);
     console.warn(`Failed to create issue for ${pkgName}: ${msg}`);
     try {
       core.warning(msg);
@@ -22,7 +32,18 @@ async function createIssueForPackage({ octo, targetRepo, token, pkgName, message
   }
 }
 
-async function createPullRequestWithLabels({ octo, owner, repo, title, head, base, body, labels = [] }) {
+interface CreatePullRequestParams {
+  octo: Octokit;
+  owner: string;
+  repo: string;
+  title: string;
+  head: string;
+  base: string;
+  body: string;
+  labels?: string[];
+}
+
+export async function createPullRequestWithLabels({ octo, owner, repo, title, head, base, body, labels = [] }: CreatePullRequestParams) {
   const { data: pr } = await octo.rest.pulls.create({ owner, repo, title, head, base, body });
   console.log('Created PR:', pr.html_url);
   if (labels.length > 0) {
@@ -30,7 +51,7 @@ async function createPullRequestWithLabels({ octo, owner, repo, title, head, bas
       await octo.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels });
       console.log(`Added labels to PR ${pr.number}: ${labels.join(', ')}`);
     } catch (e) {
-      const msg = e && e.message ? e.message : String(e);
+      const msg = e instanceof Error ? e.message : String(e);
       console.warn(`Failed adding labels for PR ${pr.number}: ${msg}`);
       try {
         core.warning(msg);
@@ -39,5 +60,3 @@ async function createPullRequestWithLabels({ octo, owner, repo, title, head, bas
   }
   return pr;
 }
-
-module.exports = { createIssueForPackage, createPullRequestWithLabels };

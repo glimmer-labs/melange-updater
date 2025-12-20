@@ -1,4 +1,6 @@
-function getGitRepoFromPipeline(pkgDoc) {
+import { PackageDoc } from '../types';
+
+export function getGitRepoFromPipeline(pkgDoc: PackageDoc): string {
   const pipeline = pkgDoc && pkgDoc.pipeline;
   if (!Array.isArray(pipeline)) return '';
   for (const step of pipeline) {
@@ -9,7 +11,7 @@ function getGitRepoFromPipeline(pkgDoc) {
   return '';
 }
 
-function getGitBranchFromPipeline(pkgDoc) {
+export function getGitBranchFromPipeline(pkgDoc: PackageDoc): string {
   const pipeline = pkgDoc && pkgDoc.pipeline;
   if (!Array.isArray(pipeline)) return '';
   for (const step of pipeline) {
@@ -19,5 +21,3 @@ function getGitBranchFromPipeline(pkgDoc) {
   }
   return '';
 }
-
-module.exports = { getGitRepoFromPipeline, getGitBranchFromPipeline };

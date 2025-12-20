@@ -1,17 +1,19 @@
-const semver = require('semver');
+import semver from 'semver';
+import { UpdateConfig } from '../types';
 
-function stripAffixes(cfg, v) {
-  if (!cfg) return v;
-  if (cfg.strip_prefix && v.startsWith(cfg.strip_prefix)) {
-    v = v.slice(cfg.strip_prefix.length);
+function stripAffixes(cfg: { strip_prefix?: string; strip_suffix?: string } | undefined, v: string): string {
+  let out = v;
+  if (!cfg) return out;
+  if (cfg.strip_prefix && out.startsWith(cfg.strip_prefix)) {
+    out = out.slice(cfg.strip_prefix.length);
   }
-  if (cfg.strip_suffix && v.endsWith(cfg.strip_suffix)) {
-    v = v.slice(0, -cfg.strip_suffix.length);
+  if (cfg.strip_suffix && out.endsWith(cfg.strip_suffix)) {
+    out = out.slice(0, -cfg.strip_suffix.length);
   }
-  return v;
+  return out;
 }
 
-function applyVersionTransformsList(list, v) {
+function applyVersionTransformsList(list: { match: string; replace: string }[] | undefined, v: string): string {
   if (!Array.isArray(list)) return v;
   let out = v;
   for (const rule of list) {
@@ -19,39 +21,35 @@ function applyVersionTransformsList(list, v) {
     try {
       const re = new RegExp(rule.match);
       out = out.replace(re, rule.replace);
-    } catch (e) {
+    } catch (_) {
       // ignore bad regex
     }
   }
   return out;
 }
 
-function applyTransforms(updateConfig, versionStr) {
+export function applyTransforms(updateConfig: UpdateConfig | undefined, versionStr: string): string {
   let v = versionStr;
   if (!v) return v;
 
-  // separator
-  if (updateConfig && updateConfig.version_separator) {
+  if (updateConfig?.version_separator) {
     v = v.split(updateConfig.version_separator).join('.');
   }
 
-  // provider-specific strips
-  if (updateConfig && updateConfig.release_monitor) {
+  if (updateConfig?.release_monitor) {
     v = stripAffixes(updateConfig.release_monitor, v);
   }
-  if (updateConfig && updateConfig.github) {
+  if (updateConfig?.github) {
     v = stripAffixes(updateConfig.github, v);
   }
-  if (updateConfig && updateConfig.git) {
+  if (updateConfig?.git) {
     v = stripAffixes(updateConfig.git, v);
   }
 
-  // version-transform rules
-  if (updateConfig && updateConfig.version_transform) {
+  if (updateConfig?.version_transform) {
     v = applyVersionTransformsList(updateConfig.version_transform, v);
   }
 
-  // Basic semver normalization: if it's not valid, try to coerce
   if (!semver.valid(v)) {
     const coerced = semver.coerce(v);
     if (coerced) v = coerced.version;
@@ -59,17 +57,15 @@ function applyTransforms(updateConfig, versionStr) {
   return v;
 }
 
-function shouldIgnoreVersion(updateConfig, versionStr) {
+export function shouldIgnoreVersion(updateConfig: UpdateConfig | undefined, versionStr: string): boolean {
   if (!updateConfig || !Array.isArray(updateConfig.ignore_regex_patterns)) return false;
   for (const pat of updateConfig.ignore_regex_patterns) {
     try {
       const re = new RegExp(pat);
       if (re.test(versionStr)) return true;
-    } catch (e) {
+    } catch (_) {
       // ignore malformed regex
     }
   }
   return false;
 }
-
-module.exports = { applyTransforms, shouldIgnoreVersion };

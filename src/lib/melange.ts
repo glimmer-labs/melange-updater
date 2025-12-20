@@ -1,33 +1,34 @@
-const fs = require('fs');
-const path = require('path');
-const glob = require('glob');
-const yaml = require('js-yaml');
+import fs from 'fs';
+import path from 'path';
+import { globSync } from 'glob';
+import yaml from 'js-yaml';
+import { PackageDoc, PackageInfo } from '../types';
 
-function findMelangePackages(repoPath) {
+export function findMelangePackages(repoPath: string): Record<string, PackageInfo> {
   const pattern = path.join(repoPath, '**/*.yaml');
-  const files = glob.sync(pattern, { nodir: true, ignore: ['**/node_modules/**', '**/.git/**'] });
-  const packages = {};
-  for (const f of files) {
+  const files = globSync(pattern, { nodir: true, ignore: ['**/node_modules/**', '**/.git/**'] });
+  const packages: Record<string, PackageInfo> = {};
+  for (const file of files) {
     try {
-      const raw = fs.readFileSync(f, 'utf8');
-      const doc = yaml.load(raw);
+      const raw = fs.readFileSync(file, 'utf8');
+      const doc = yaml.load(raw) as PackageDoc | undefined;
       if (doc && (doc.package || doc.Package) && doc.update) {
-        const name = doc.package && doc.package.name ? doc.package.name : (doc.Package && doc.Package.name ? doc.Package.name : path.basename(f));
-        packages[name] = { file: f, doc };
+        const name = doc.package?.name || doc.Package?.name || path.basename(file);
+        packages[name] = { file, doc };
       }
-    } catch (e) {
+    } catch (_) {
       // ignore parse errors
     }
   }
   return packages;
 }
 
-function writeMelangePackage(pkg) {
+export function writeMelangePackage(pkg: PackageInfo): void {
   const yamlStr = yaml.dump(pkg.doc);
   fs.writeFileSync(pkg.file, yamlStr, 'utf8');
 }
 
-function updateExpectedCommitInFile(filePath, commitSha) {
+export function updateExpectedCommitInFile(filePath: string, commitSha: string): boolean {
   if (!commitSha) return false;
   const raw = fs.readFileSync(filePath, 'utf8');
   const lines = raw.split(/\r?\n/);
@@ -50,7 +51,7 @@ function updateExpectedCommitInFile(filePath, commitSha) {
 
       const withMatch = line.match(/^(\s*)with:\s*$/);
       if (withMatch) {
-        withIndent = withMatch[1] + '  ';
+        withIndent = `${withMatch[1]}  `;
         insertPos = j + 1;
         continue;
       }
@@ -82,21 +83,19 @@ function updateExpectedCommitInFile(filePath, commitSha) {
   return true;
 }
 
-function updatePackageVersionInFile(filePath, newVersion) {
+export function updatePackageVersionInFile(filePath: string, newVersion: string): boolean {
   const raw = fs.readFileSync(filePath, 'utf8');
   const lines = raw.split(/\r?\n/);
   let changed = false;
 
-  // Find top-level package: block
   for (let i = 0; i < lines.length; i++) {
     if (/^package:\s*$/.test(lines[i].trim())) {
-      // scan forward for indented fields
       for (let j = i + 1; j < lines.length; j++) {
         const line = lines[j];
-        if (/^\S/.test(line)) break; // dedent => end of package block
-        const m = line.match(/^(\s+)version:\s*(.*)$/);
-        if (m) {
-          const indent = m[1];
+        if (/^\S/.test(line)) break;
+        const match = line.match(/^(\s+)version:\s*(.*)$/);
+        if (match) {
+          const indent = match[1];
           lines[j] = `${indent}version: ${newVersion}`;
           changed = true;
           break;
@@ -111,7 +110,7 @@ function updatePackageVersionInFile(filePath, newVersion) {
   return true;
 }
 
-function updatePackageEpochInFile(filePath, newEpoch = 0) {
+export function updatePackageEpochInFile(filePath: string, newEpoch = 0): boolean {
   const raw = fs.readFileSync(filePath, 'utf8');
   const lines = raw.split(/\r?\n/);
   let changed = false;
@@ -121,10 +120,10 @@ function updatePackageEpochInFile(filePath, newEpoch = 0) {
       for (let j = i + 1; j < lines.length; j++) {
         const line = lines[j];
         if (/^\S/.test(line)) break;
-        const m = line.match(/^(\s+)epoch:\s*(.*)$/);
-        if (m) {
-          const indent = m[1];
-          const current = m[2].trim();
+        const match = line.match(/^(\s+)epoch:\s*(.*)$/);
+        if (match) {
+          const indent = match[1];
+          const current = match[2].trim();
           if (current !== String(newEpoch)) {
             lines[j] = `${indent}epoch: ${newEpoch}`;
             changed = true;
@@ -141,20 +140,18 @@ function updatePackageEpochInFile(filePath, newEpoch = 0) {
   return true;
 }
 
-function applyVersionToPackage(pkg, newVersion) {
-  // Try targeted in-place replacement to preserve formatting
+export function applyVersionToPackage(pkg: PackageInfo, newVersion: string): boolean {
   const versionUpdated = updatePackageVersionInFile(pkg.file, newVersion);
   const epochUpdated = updatePackageEpochInFile(pkg.file, 0);
   if (versionUpdated || epochUpdated) return true;
 
-  // Fallback to full YAML write if patterns not found
-  if (pkg.doc.package && pkg.doc.package.version) {
+  if (pkg.doc.package?.version !== undefined) {
     pkg.doc.package.version = newVersion;
     if (typeof pkg.doc.package.epoch !== 'undefined') pkg.doc.package.epoch = 0;
     writeMelangePackage(pkg);
     return true;
   }
-  if (pkg.doc.Package && pkg.doc.Package.version) {
+  if (pkg.doc.Package?.version !== undefined) {
     pkg.doc.Package.version = newVersion;
     if (typeof pkg.doc.Package.epoch !== 'undefined') pkg.doc.Package.epoch = 0;
     writeMelangePackage(pkg);
@@ -162,12 +159,3 @@ function applyVersionToPackage(pkg, newVersion) {
   }
   return false;
 }
-
-module.exports = {
-  findMelangePackages,
-  writeMelangePackage,
-  updatePackageVersionInFile,
-  updatePackageEpochInFile,
-  updateExpectedCommitInFile,
-  applyVersionToPackage,
-};

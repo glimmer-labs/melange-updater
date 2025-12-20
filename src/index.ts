@@ -1,45 +1,52 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const path = require('path');
-const minimist = require('minimist');
-const core = require('@actions/core');
-const { Octokit } = require('@octokit/rest');
-const { getLatestReleaseVersion } = require('./lib/releaseMonitor');
-const { getLatestGithubRelease } = require('./lib/githubReleases');
-const { getLatestGitTag } = require('./lib/gitTags');
-const { findMelangePackages, applyVersionToPackage, updateExpectedCommitInFile } = require('./lib/melange');
-const { getGitRepoFromPipeline, getGitBranchFromPipeline } = require('./lib/pipeline');
-const { resolveExpectedCommit } = require('./lib/commitResolver');
-const { applyTransforms, shouldIgnoreVersion } = require('./lib/transform');
-const { run, execGetOutput, escapeShell, sanitizeName, failAndExit, writeSummary, ensureCleanWorkingTree } = require('./lib/actionUtils');
-const { createIssueForPackage, createPullRequestWithLabels } = require('./lib/githubActions');
-const semver = require('semver');
+import path from 'path';
+import minimist from 'minimist';
+import * as core from '@actions/core';
+import { Octokit } from '@octokit/rest';
+import semver from 'semver';
+import { getLatestReleaseVersion } from './lib/releaseMonitor';
+import { getLatestGithubRelease } from './lib/githubReleases';
+import { getLatestGitTag } from './lib/gitTags';
+import { findMelangePackages, applyVersionToPackage, updateExpectedCommitInFile } from './lib/melange';
+import { getGitRepoFromPipeline, getGitBranchFromPipeline } from './lib/pipeline';
+import { resolveExpectedCommit } from './lib/commitResolver';
+import { applyTransforms, shouldIgnoreVersion } from './lib/transform';
+import { run, execGetOutput, escapeShell, sanitizeName, failAndExit, writeSummary, ensureCleanWorkingTree } from './lib/actionUtils';
+import { createIssueForPackage, createPullRequestWithLabels } from './lib/githubActions';
+import { PackageInfo, UpdateConfig, UpdateEntry, UpdateMap } from './types';
+import { normalizeKeys } from './lib/updateConfig';
 
-async function main() {
-  // Support both CLI invocation (minimist) and GitHub Action inputs via env/with.
+function parseBooleanFlag(value: unknown): boolean {
+  return value === true || value === 'true';
+}
+
+function getInputValue(name: string, fallback = ''): string {
+  try {
+    const val = core.getInput(name, { trimWhitespace: true });
+    if (val) return val;
+  } catch (_) {
+    // ignore if core not available or input missing
+  }
+  const envKey = `INPUT_${name.replace(/-/g, '_').toUpperCase()}`;
+  return process.env[envKey] || fallback;
+}
+
+async function main(): Promise<void> {
   const argv = minimist(process.argv.slice(2));
 
-  function input(name, fallback = '') {
-    // core.getInput returns '' if not set; prefer env INPUT_* when running as action.
-    try {
-      const v = core.getInput(name, { trimWhitespace: true });
-      if (v) return v;
-    } catch (_) {
-      // ignore if core not available or input missing
-    }
-    return process.env[`INPUT_${name.replace(/-/g, '_').toUpperCase()}`] || fallback;
-  }
-
-  const targetRepo = argv['target-repo'] || argv['repository'] || input('repository');
-  const token = argv['token'] || process.env.GITHUB_TOKEN || input('token');
-  const dryRun = argv['dry-run'] === true || argv['dry-run'] === 'true';
-  const preview = argv['preview'] === true || argv['preview'] === 'true' || argv['no-commit'] === true || argv['no-commit'] === 'true';
-  const releaseMonitorToken = argv['release-monitor-token'] || process.env.RELEASE_MONITOR_TOKEN || input('release_monitor_token') || '';
-  const gitAuthorName = argv['git-author-name'] || input('git_author_name') || 'melange-updater';
-  const gitAuthorEmail = argv['git-author-email'] || input('git_author_email') || 'noreply@example.com';
-  const repoPath = argv['repo-path'] || input('repo-path') || process.env.GITHUB_WORKSPACE || '.';
-  const githubLabels = (argv['github-labels'] || input('github-labels') || '').split(',').map(s => s.trim()).filter(Boolean);
+  const targetRepo = (argv['target-repo'] as string) || (argv['repository'] as string) || getInputValue('repository');
+  const token = (argv['token'] as string) || process.env.GITHUB_TOKEN || getInputValue('token');
+  const dryRun = parseBooleanFlag(argv['dry-run']);
+  const preview = parseBooleanFlag(argv['preview']) || parseBooleanFlag(argv['no-commit']);
+  const releaseMonitorToken = (argv['release-monitor-token'] as string) || process.env.RELEASE_MONITOR_TOKEN || getInputValue('release_monitor_token') || '';
+  const gitAuthorName = (argv['git-author-name'] as string) || getInputValue('git_author_name') || 'melange-updater';
+  const gitAuthorEmail = (argv['git-author-email'] as string) || getInputValue('git_author_email') || 'noreply@example.com';
+  const repoPath = (argv['repo-path'] as string) || getInputValue('repo-path') || process.env.GITHUB_WORKSPACE || '.';
+  const githubLabels = ((argv['github-labels'] as string) || getInputValue('github-labels') || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   if (!targetRepo) {
     failAndExit('No target repo specified. Use --target-repo owner/repo');
@@ -54,23 +61,19 @@ async function main() {
   const absRepoPath = path.resolve(process.cwd(), repoPath);
   console.log('Repository path:', absRepoPath);
 
-
-  // Discover melange packages
   const packages = findMelangePackages(absRepoPath);
   console.log('Found', Object.keys(packages).length, 'candidate melange packages');
 
-  const updates = {};
+  const updates: UpdateMap = {};
   const octo = new Octokit({ auth: token });
-  const { normalizeKeys } = require('./lib/updateConfig');
-  const createdPRs = [];
-  const failedPackages = [];
+  const createdPRs: { name: string; url: string }[] = [];
+  const failedPackages: string[] = [];
 
   for (const [name, pkg] of Object.entries(packages)) {
     try {
       const updateCfgRaw = pkg.doc.update || {};
-      const updateCfg = normalizeKeys(updateCfgRaw || {});
+      const updateCfg = normalizeKeys(updateCfgRaw) as UpdateConfig;
 
-      // honor enable flag; manual packages are handled separately (we'll surface manual updates in PR without auto-applying)
       if (updateCfg.enabled === false) {
         console.log(`${name}: update.enabled is false — skipping`);
         continue;
@@ -84,7 +87,8 @@ async function main() {
       let branchForCommit = '';
       let githubOwner = '';
       let githubRepoName = '';
-      if (updateCfg.release_monitor && updateCfg.release_monitor.identifier) {
+
+      if (updateCfg.release_monitor?.identifier) {
         const id = updateCfg.release_monitor.identifier;
         console.log(`${name}: querying release-monitor id ${id}`);
         latest = await getLatestReleaseVersion(id, {
@@ -93,19 +97,18 @@ async function main() {
           version_filter_contains: updateCfg.release_monitor.version_filter_contains,
         });
         latestSource = 'release-monitor';
-        repoUrlForCommit = (updateCfg.git && updateCfg.git.repository) || getGitRepoFromPipeline(pkg.doc);
-        branchForCommit = (updateCfg.git && updateCfg.git.branch) || getGitBranchFromPipeline(pkg.doc);
+        repoUrlForCommit = updateCfg.git?.repository || getGitRepoFromPipeline(pkg.doc);
+        branchForCommit = updateCfg.git?.branch || getGitBranchFromPipeline(pkg.doc);
       }
 
-      // GitHub config uses `identifier: org/repo` in melange YAML
-      if (!latest && updateCfg.github && updateCfg.github.identifier) {
+      if (!latest && updateCfg.github?.identifier) {
         const [owner, repo] = (updateCfg.github.identifier || '').split('/');
         if (owner && repo) {
           console.log(`${name}: querying GitHub releases ${owner}/${repo}`);
           latest = await getLatestGithubRelease(owner, repo, octo, {
             useTag: !!updateCfg.github.use_tag,
             tag_filter_prefix: updateCfg.github.tag_filter_prefix,
-            tag_filter_contains: updateCfg.github.tag_filter_contains || updateCfg.github.tag_filter, // legacy
+            tag_filter_contains: updateCfg.github.tag_filter_contains || updateCfg.github.tag_filter,
           });
           if (latest) {
             latestSource = 'github';
@@ -116,7 +119,6 @@ async function main() {
         }
       }
 
-      // Git mode: query remote tags of the repo used by git-checkout
       if (!latest && updateCfg.git) {
         const repoUrl = updateCfg.git.repository || getGitRepoFromPipeline(pkg.doc);
         if (repoUrl) {
@@ -133,7 +135,8 @@ async function main() {
               branchForCommit = updateCfg.git.branch || getGitBranchFromPipeline(pkg.doc) || '';
             }
           } catch (e) {
-            console.warn(`${name}: failed to query git tags: ${e.message}`);
+            const msg = e instanceof Error ? e.message : String(e);
+            console.warn(`${name}: failed to query git tags: ${msg}`);
           }
         }
       }
@@ -143,24 +146,20 @@ async function main() {
         continue;
       }
 
-      // apply provider-specific strips + version transforms
       const transformed = applyTransforms(updateCfg, latest);
       console.log(`${name}: latest raw=${latest} transformed=${transformed}`);
 
-      // ignore patterns
       if (shouldIgnoreVersion(updateCfg, transformed)) {
         console.log(`${name}: version ${transformed} ignored by ignore-regex-patterns`);
         continue;
       }
 
-      // determine current package version
-      const currentVersion = (pkg.doc.package && pkg.doc.package.version) || (pkg.doc.Package && pkg.doc.Package.version) || '';
+      const currentVersion = pkg.doc.package?.version || pkg.doc.Package?.version || '';
 
       if (!currentVersion) {
         console.log(`${name}: no current version in package metadata`);
       }
 
-      // compare semver if possible
       let shouldUpdate = false;
       if (semver.valid(transformed) && semver.valid(currentVersion)) {
         shouldUpdate = semver.gt(transformed, currentVersion);
@@ -184,21 +183,20 @@ async function main() {
           });
         }
         updates[name] = { from: currentVersion, to: transformed, file: pkg.file, manual: isManual, commit: commitSha };
-        // do not write files yet; we'll apply changes only if there are updates and not in dry-run
       }
     } catch (e) {
-      console.warn(`failed to process package ${name}: ${e.message}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`failed to process package ${name}: ${msg}`);
       if (!dryRun && !preview) {
-        await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: e.message, phase: 'version discovery' });
+        await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: msg, phase: 'version discovery' });
       }
     }
   }
 
-  // If no updates detected, exit without creating any branch or committing
   const updatesCount = Object.keys(updates).length;
   const updateEntries = Object.entries(updates);
-  const manualUpdates = updateEntries.filter(([, u]) => u.manual);
-  const nonManualUpdates = updateEntries.filter(([, u]) => !u.manual);
+  const manualUpdates = updateEntries.filter(([, u]) => u.manual) as Array<[string, UpdateEntry]>;
+  const nonManualUpdates = updateEntries.filter(([, u]) => !u.manual) as Array<[string, UpdateEntry]>;
 
   if (updatesCount === 0) {
     console.log('No updates detected. Exiting without creating a branch.');
@@ -207,7 +205,6 @@ async function main() {
     return;
   }
 
-  // If dry-run and there are updates, just print what would be done and exit
   if (dryRun) {
     console.log('Dry run enabled — the following updates would be applied:');
     console.log(JSON.stringify(updates, null, 2));
@@ -215,7 +212,6 @@ async function main() {
     return;
   }
 
-  // Preview/no-commit mode: apply updates locally to files, write summary, but do NOT branch/commit/push/PR
   if (preview) {
     for (const [name, u] of Object.entries(updates)) {
       if (u.manual) continue;
@@ -230,8 +226,6 @@ async function main() {
     await writeSummary({ mode: 'preview', updates, manualUpdates });
     return;
   }
-
-  // Proceed to create a PR per non-manual package update
 
   if (nonManualUpdates.length === 0) {
     console.log('Only manual updates detected; nothing to auto-apply.');
@@ -255,7 +249,6 @@ async function main() {
 
   for (const [name, u] of nonManualUpdates) {
     try {
-      // ensure we start from the default/base branch for each package
       run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
 
       const pkg = packages[name];
@@ -264,7 +257,6 @@ async function main() {
         continue;
       }
 
-      // Apply the update to the working tree
       applyVersionToPackage(pkg, u.to);
       if (u.commit) {
         updateExpectedCommitInFile(pkg.file, u.commit);
@@ -274,13 +266,14 @@ async function main() {
       const branch = `melange-update-${safeName}-${Date.now()}`;
       run(`git checkout -b ${branch}`, { cwd: absRepoPath });
       run('git add -A', { cwd: absRepoPath });
-      run('git commit -m "chore(update): automatic update for ' + escapeShell(name) + '"', { cwd: absRepoPath });
+      run(`git commit -m "chore(update): automatic update for ${escapeShell(name)}"`, { cwd: absRepoPath });
       try {
         run(`git push ${remoteUrl} HEAD:${branch}`, { cwd: absRepoPath });
       } catch (pushErr) {
-        console.warn(`Failed to push branch for ${name}: ${pushErr.message}`);
+        const msg = pushErr instanceof Error ? pushErr.message : String(pushErr);
+        console.warn(`Failed to push branch for ${name}: ${msg}`);
         failedPackages.push(name);
-        await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: pushErr.message, phase: 'git push' });
+        await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: msg, phase: 'git push' });
         run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
         continue;
       }
@@ -291,17 +284,18 @@ async function main() {
       const pr = await createPullRequestWithLabels({ octo, owner, repo, title: prTitle, head: branch, base: defaultBranch, body: prBody, labels: githubLabels });
       createdPRs.push({ name, url: pr.html_url });
 
-      // return to default branch for the next package
       run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
     } catch (e) {
-      console.warn(`Failed to create PR for ${name}: ${e.message}`);
-      await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: e.message, phase: 'PR creation' });
-      try { run(`git checkout ${defaultBranch}`, { cwd: absRepoPath }); } catch (_) {}
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`Failed to create PR for ${name}: ${msg}`);
+      await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: msg, phase: 'PR creation' });
+      try {
+        run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
+      } catch (_) {}
       failedPackages.push(name);
     }
   }
 
-  // return to the starting branch
   run(`git checkout ${startingBranch}`, { cwd: absRepoPath });
 
   if (manualUpdates.length > 0) {
@@ -309,7 +303,7 @@ async function main() {
   }
 
   console.log(`PRs created: ${createdPRs.length}`);
-  createdPRs.forEach(p => console.log(`- ${p.name}: ${p.url}`));
+  createdPRs.forEach((p) => console.log(`- ${p.name}: ${p.url}`));
   if (failedPackages.length) {
     console.log(`Packages that failed to push/PR: ${failedPackages.join(', ')}`);
   }
@@ -319,10 +313,10 @@ async function main() {
   await writeSummary({ mode: 'pr', updates, createdPRs, manualUpdates, failedPackages });
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error(err);
   try {
-    core.setFailed(err.message || String(err));
+    core.setFailed((err as Error).message || String(err));
   } catch (_) {
     // ignore if core is unavailable
   }

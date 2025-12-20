@@ -1,28 +1,29 @@
-const { execSync } = require('child_process');
-const core = require('@actions/core');
+import { execSync, ExecSyncOptions } from 'child_process';
+import * as core from '@actions/core';
+import { UpdateEntry, UpdateMap } from '../types';
 
-function run(cmd, opts = {}) {
+export function run(cmd: string, opts: ExecSyncOptions = {}): void {
   console.log('>', cmd);
-  return execSync(cmd, { stdio: 'inherit', ...opts });
+  execSync(cmd, { stdio: 'inherit', ...opts });
 }
 
-function execGetOutput(cmd, cwd) {
+export function execGetOutput(cmd: string, cwd?: string): string {
   try {
     return execSync(cmd, { cwd, encoding: 'utf8' });
-  } catch (e) {
+  } catch (_) {
     return '';
   }
 }
 
-function escapeShell(s) {
-  return s.replace(/"/g, '\\"');
+export function escapeShell(value: string): string {
+  return value.replace(/"/g, '\\"');
 }
 
-function sanitizeName(name) {
+export function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '-');
 }
 
-function failAndExit(message) {
+export function failAndExit(message: string): never {
   console.error(message);
   try {
     core.setFailed(message);
@@ -32,7 +33,15 @@ function failAndExit(message) {
   process.exit(1);
 }
 
-async function writeSummary({ mode, updates = {}, createdPRs = [], manualUpdates = [], failedPackages = [] }) {
+interface WriteSummaryInput {
+  mode?: string;
+  updates?: UpdateMap;
+  createdPRs?: { name: string; url: string }[];
+  manualUpdates?: Array<[string, UpdateEntry]>;
+  failedPackages?: string[];
+}
+
+export async function writeSummary({ mode, updates = {}, createdPRs = [], manualUpdates = [], failedPackages = [] }: WriteSummaryInput): Promise<void> {
   // Skip when running outside of GitHub Actions where GITHUB_STEP_SUMMARY is missing.
   if (!core || !core.summary || !process.env.GITHUB_STEP_SUMMARY) return;
   const s = core.summary;
@@ -75,12 +84,12 @@ async function writeSummary({ mode, updates = {}, createdPRs = [], manualUpdates
   await s.write();
 }
 
-function ensureCleanWorkingTree(cwd, execGetOutputFn) {
+export type ExecOutputFn = (cmd: string, cwd?: string) => string;
+
+export function ensureCleanWorkingTree(cwd: string, execGetOutputFn: ExecOutputFn): string {
   const status = execGetOutputFn('git status --porcelain', cwd);
   if (status.trim()) {
     return 'Working tree is dirty. Please ensure a clean state before running the action.';
   }
   return '';
 }
-
-module.exports = { run, execGetOutput, escapeShell, sanitizeName, failAndExit, writeSummary, ensureCleanWorkingTree };
