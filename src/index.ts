@@ -13,7 +13,7 @@ import { getGitRepoFromPipeline, getGitBranchFromPipeline } from './lib/pipeline
 import { resolveExpectedCommit } from './lib/commitResolver';
 import { applyTransforms, shouldIgnoreVersion } from './lib/transform';
 import { run, execGetOutput, escapeShell, sanitizeName, failAndExit, writeSummary, ensureCleanWorkingTree } from './lib/actionUtils';
-import { createIssueForPackage, createPullRequestWithLabels } from './lib/githubActions';
+import { createIssueForPackage, createPullRequestWithLabels, findOpenPullRequestByHead } from './lib/githubActions';
 import { PackageInfo, UpdateConfig, UpdateEntry, UpdateMap } from './types';
 import { normalizeKeys } from './lib/updateConfig';
 
@@ -265,12 +265,33 @@ async function main(): Promise<void> {
       }
 
       const safeName = sanitizeName(name);
-      const branch = `melange-update-${safeName}-${Date.now()}`;
-      run(`git checkout -b ${branch}`, { cwd: absRepoPath });
+      const branch = `melange-update-${safeName}`;
+
+      const remoteHead = execGetOutput(`git ls-remote ${remoteUrl} refs/heads/${branch}`, absRepoPath).trim();
+      const branchExistsRemote = !!remoteHead;
+
+      if (branchExistsRemote) {
+        // Reuse existing branch to avoid duplicate PRs; fetch latest state then checkout.
+        run(`git fetch ${remoteUrl} ${branch}:${branch}`, { cwd: absRepoPath });
+        run(`git checkout ${branch}`, { cwd: absRepoPath });
+      } else {
+        // Fresh branch from default branch.
+        run(`git checkout -B ${branch} ${defaultBranch}`, { cwd: absRepoPath });
+      }
+
       run('git add -A', { cwd: absRepoPath });
+
+      const status = execGetOutput('git status --porcelain', absRepoPath).trim();
+      if (!status) {
+        console.log(`${name}: no changes to commit after applying update; skipping push/PR.`);
+        run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
+        continue;
+      }
+
       run(`git commit -m "chore(update): automatic update for ${escapeShell(name)}"`, { cwd: absRepoPath });
+
       try {
-        run(`git push ${remoteUrl} HEAD:${branch}`, { cwd: absRepoPath });
+        run(`git push ${remoteUrl} ${branch}`, { cwd: absRepoPath });
       } catch (pushErr) {
         const msg = pushErr instanceof Error ? pushErr.message : String(pushErr);
         console.warn(`Failed to push branch for ${name}: ${msg}`);
@@ -281,17 +302,24 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const prTitle = `Automated update for ${name}`;
-      const prBody = `This PR updates ${name}: ${u.from} -> ${u.to}${githubLabels.length ? `\n\nLabels: ${githubLabels.join(', ')}` : ''}`;
+      const existingPr = await findOpenPullRequestByHead({ octo, owner, repo, head: branch });
 
-      const pr = await createPullRequestWithLabels({ octo, owner, repo, title: prTitle, head: branch, base: defaultBranch, body: prBody, labels: githubLabels });
-      createdPRs.push({ name, url: pr.html_url });
+      if (existingPr) {
+        console.log(`${name}: updated existing PR ${existingPr.html_url}`);
+        createdPRs.push({ name, url: existingPr.html_url });
+      } else {
+        const prTitle = `Automated update for ${name}`;
+        const prBody = `This PR updates ${name}: ${u.from} -> ${u.to}${githubLabels.length ? `\n\nLabels: ${githubLabels.join(', ')}` : ''}`;
+
+        const pr = await createPullRequestWithLabels({ octo, owner, repo, title: prTitle, head: branch, base: defaultBranch, body: prBody, labels: githubLabels });
+        createdPRs.push({ name, url: pr.html_url });
+      }
 
       run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn(`Failed to create PR for ${name}: ${msg}`);
-       packageErrors.push({ name, phase: 'PR creation', message: msg });
+      packageErrors.push({ name, phase: 'PR creation', message: msg });
       await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: msg, phase: 'PR creation' });
       try {
         run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });

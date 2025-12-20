@@ -43,6 +43,13 @@ interface CreatePullRequestParams {
   labels?: string[];
 }
 
+interface FindPullRequestParams {
+  octo: Octokit;
+  owner: string;
+  repo: string;
+  head: string; // branch name without owner prefix
+}
+
 export async function createPullRequestWithLabels({ octo, owner, repo, title, head, base, body, labels = [] }: CreatePullRequestParams) {
   const { data: pr } = await octo.rest.pulls.create({ owner, repo, title, head, base, body });
   console.log('Created PR:', pr.html_url);
@@ -59,4 +66,9 @@ export async function createPullRequestWithLabels({ octo, owner, repo, title, he
     }
   }
   return pr;
+}
+
+export async function findOpenPullRequestByHead({ octo, owner, repo, head }: FindPullRequestParams) {
+  const { data: pulls } = await octo.rest.pulls.list({ owner, repo, state: 'open', head: `${owner}:${head}`, per_page: 1 });
+  return pulls[0] ?? null;
 }

@@ -33266,12 +33266,28 @@ async function main() {
                 (0, melange_1.updateExpectedCommitInFile)(pkg.file, u.commit);
             }
             const safeName = (0, actionUtils_1.sanitizeName)(name);
-            const branch = `melange-update-${safeName}-${Date.now()}`;
-            (0, actionUtils_1.run)(`git checkout -b ${branch}`, { cwd: absRepoPath });
+            const branch = `melange-update-${safeName}`;
+            const remoteHead = (0, actionUtils_1.execGetOutput)(`git ls-remote ${remoteUrl} refs/heads/${branch}`, absRepoPath).trim();
+            const branchExistsRemote = !!remoteHead;
+            if (branchExistsRemote) {
+                // Reuse existing branch to avoid duplicate PRs; fetch latest state then checkout.
+                (0, actionUtils_1.run)(`git fetch ${remoteUrl} ${branch}:${branch}`, { cwd: absRepoPath });
+                (0, actionUtils_1.run)(`git checkout ${branch}`, { cwd: absRepoPath });
+            }
+            else {
+                // Fresh branch from default branch.
+                (0, actionUtils_1.run)(`git checkout -B ${branch} ${defaultBranch}`, { cwd: absRepoPath });
+            }
             (0, actionUtils_1.run)('git add -A', { cwd: absRepoPath });
+            const status = (0, actionUtils_1.execGetOutput)('git status --porcelain', absRepoPath).trim();
+            if (!status) {
+                console.log(`${name}: no changes to commit after applying update; skipping push/PR.`);
+                (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
+                continue;
+            }
             (0, actionUtils_1.run)(`git commit -m "chore(update): automatic update for ${(0, actionUtils_1.escapeShell)(name)}"`, { cwd: absRepoPath });
             try {
-                (0, actionUtils_1.run)(`git push ${remoteUrl} HEAD:${branch}`, { cwd: absRepoPath });
+                (0, actionUtils_1.run)(`git push ${remoteUrl} ${branch}`, { cwd: absRepoPath });
             }
             catch (pushErr) {
                 const msg = pushErr instanceof Error ? pushErr.message : String(pushErr);
@@ -33282,10 +33298,17 @@ async function main() {
                 (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
                 continue;
             }
-            const prTitle = `Automated update for ${name}`;
-            const prBody = `This PR updates ${name}: ${u.from} -> ${u.to}${githubLabels.length ? `\n\nLabels: ${githubLabels.join(', ')}` : ''}`;
-            const pr = await (0, githubActions_1.createPullRequestWithLabels)({ octo, owner, repo, title: prTitle, head: branch, base: defaultBranch, body: prBody, labels: githubLabels });
-            createdPRs.push({ name, url: pr.html_url });
+            const existingPr = await (0, githubActions_1.findOpenPullRequestByHead)({ octo, owner, repo, head: branch });
+            if (existingPr) {
+                console.log(`${name}: updated existing PR ${existingPr.html_url}`);
+                createdPRs.push({ name, url: existingPr.html_url });
+            }
+            else {
+                const prTitle = `Automated update for ${name}`;
+                const prBody = `This PR updates ${name}: ${u.from} -> ${u.to}${githubLabels.length ? `\n\nLabels: ${githubLabels.join(', ')}` : ''}`;
+                const pr = await (0, githubActions_1.createPullRequestWithLabels)({ octo, owner, repo, title: prTitle, head: branch, base: defaultBranch, body: prBody, labels: githubLabels });
+                createdPRs.push({ name, url: pr.html_url });
+            }
             (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
         }
         catch (e) {
@@ -33645,6 +33668,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.createIssueForPackage = createIssueForPackage;
 exports.createPullRequestWithLabels = createPullRequestWithLabels;
+exports.findOpenPullRequestByHead = findOpenPullRequestByHead;
 const core = __importStar(__nccwpck_require__(7484));
 async function createIssueForPackage({ octo, targetRepo, token, pkgName, message, phase }) {
     if (!token) {
@@ -33687,6 +33711,10 @@ async function createPullRequestWithLabels({ octo, owner, repo, title, head, bas
         }
     }
     return pr;
+}
+async function findOpenPullRequestByHead({ octo, owner, repo, head }) {
+    const { data: pulls } = await octo.rest.pulls.list({ owner, repo, state: 'open', head: `${owner}:${head}`, per_page: 1 });
+    return pulls[0] ?? null;
 }
 
 
