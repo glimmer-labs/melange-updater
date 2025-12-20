@@ -1,0 +1,44 @@
+name: 'melange-updater'
+description: |
+  Melange Updater (Node 24) — updates melange package YAMLs using Release Monitor, GitHub releases/tags, and git tags, opening one PR per package.
+branding:
+  color: 'green'
+  icon: 'package'
+
+inputs:
+  repository:
+    description: 'GitHub repository to use org/repo.'
+    required: true
+    default: ''
+  token:
+    description: 'GitHub token.'
+    required: true
+    default: ''
+  release_monitor_token:
+    description: 'Release Monitor token (optional).'
+    required: false
+    default: ''
+  git_author_name:
+    description: 'Author name to commit.'
+    required: true
+    default: ''
+  git_author_email:
+    description: 'Author email to commit.'
+    required: true
+    default: ''
+  use-gitsign:
+    description: 'Whether to attempt signed commits.'
+    required: false
+    default: 'false'
+  github-labels:
+    description: 'Comma-separated labels to add to created PR.'
+    required: false
+    default: ''
+  repo-path:
+    description: 'Path to the checked-out repository (defaults to workspace).'
+    required: false
+    default: '.'
+
+runs:
+  using: 'node24'
+  main: 'src/index.js'
