@@ -23,6 +23,15 @@ export function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '-');
 }
 
+// Redact common token formats so we don't leak secrets in logs or issues.
+export function redactSecrets(value: string): string {
+  if (!value) return value;
+  let out = value;
+  out = out.replace(/x-access-token:[^@\s]+@/g, 'x-access-token:[REDACTED]@');
+  out = out.replace(/gh[soupm]_[A-Za-z0-9]{12,}/g, 'gh*_REDACTED');
+  return out;
+}
+
 export function failAndExit(message: string): never {
   console.error(message);
   try {

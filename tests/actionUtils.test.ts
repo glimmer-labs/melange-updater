@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeName, escapeShell, ensureCleanWorkingTree } from '../src/lib/actionUtils';
+import { sanitizeName, escapeShell, ensureCleanWorkingTree, redactSecrets } from '../src/lib/actionUtils';
 
 describe('action utils', () => {
   it('sanitizes names by replacing disallowed characters', () => {
@@ -20,5 +20,12 @@ describe('action utils', () => {
   it('returns empty string for clean working tree', () => {
     const message = ensureCleanWorkingTree('/tmp', () => '   \n');
     expect(message).toBe('');
+  });
+
+  it('redacts common token shapes', () => {
+    const input = 'push failed to https://x-access-token:ghs_ABC1234567890@github.com/repo.git';
+    const out = redactSecrets(input);
+    expect(out).not.toContain('ghs_');
+    expect(out).toContain('x-access-token:[REDACTED]@');
   });
 });

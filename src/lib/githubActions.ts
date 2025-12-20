@@ -1,5 +1,6 @@
 import * as core from '@actions/core';
 import { Octokit } from '@octokit/rest';
+import { redactSecrets } from './actionUtils';
 
 interface CreateIssueParams {
   octo: Octokit;
@@ -11,6 +12,7 @@ interface CreateIssueParams {
 }
 
 export async function createIssueForPackage({ octo, targetRepo, token, pkgName, message, phase }: CreateIssueParams): Promise<unknown> {
+  const safeMessage = redactSecrets(message);
   if (!token) {
     console.warn(`Cannot create issue for ${pkgName} (${phase}): no token available.`);
     return null;
@@ -18,7 +20,7 @@ export async function createIssueForPackage({ octo, targetRepo, token, pkgName, 
   try {
     const [owner, repo] = targetRepo.split('/');
     const title = `melange updater failure for ${pkgName}`;
-    const body = `melange updater encountered an error ${phase ? `during ${phase} ` : ''}for package **${pkgName}**.\n\nError: ${message}`;
+    const body = `melange updater encountered an error ${phase ? `during ${phase} ` : ''}for package **${pkgName}**.\n\nError: ${safeMessage}`;
     const { data: issue } = await octo.rest.issues.create({ owner, repo, title, body });
     console.log(`Created issue for ${pkgName}: ${title}`);
     return issue;

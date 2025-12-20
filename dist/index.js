@@ -33197,10 +33197,11 @@ async function main() {
         }
         catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            console.warn(`failed to process package ${name}: ${msg}`);
-            packageErrors.push({ name, phase: 'version discovery', message: msg });
+            const safeMsg = (0, actionUtils_1.redactSecrets)(msg);
+            console.warn(`failed to process package ${name}: ${safeMsg}`);
+            packageErrors.push({ name, phase: 'version discovery', message: safeMsg });
             if (!dryRun && !preview) {
-                await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: msg, phase: 'version discovery' });
+                await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'version discovery' });
             }
         }
     }
@@ -33291,10 +33292,11 @@ async function main() {
             }
             catch (pushErr) {
                 const msg = pushErr instanceof Error ? pushErr.message : String(pushErr);
-                console.warn(`Failed to push branch for ${name}: ${msg}`);
+                const safeMsg = (0, actionUtils_1.redactSecrets)(msg);
+                console.warn(`Failed to push branch for ${name}: ${safeMsg}`);
                 failedPackages.push(name);
-                packageErrors.push({ name, phase: 'git push', message: msg });
-                await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: msg, phase: 'git push' });
+                packageErrors.push({ name, phase: 'git push', message: safeMsg });
+                await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'git push' });
                 (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
                 continue;
             }
@@ -33313,9 +33315,10 @@ async function main() {
         }
         catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            console.warn(`Failed to create PR for ${name}: ${msg}`);
-            packageErrors.push({ name, phase: 'PR creation', message: msg });
-            await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: msg, phase: 'PR creation' });
+            const safeMsg = (0, actionUtils_1.redactSecrets)(msg);
+            console.warn(`Failed to create PR for ${name}: ${safeMsg}`);
+            packageErrors.push({ name, phase: 'PR creation', message: safeMsg });
+            await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'PR creation' });
             try {
                 (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
             }
@@ -33392,6 +33395,7 @@ exports.run = run;
 exports.execGetOutput = execGetOutput;
 exports.escapeShell = escapeShell;
 exports.sanitizeName = sanitizeName;
+exports.redactSecrets = redactSecrets;
 exports.failAndExit = failAndExit;
 exports.writeSummary = writeSummary;
 exports.ensureCleanWorkingTree = ensureCleanWorkingTree;
@@ -33414,6 +33418,15 @@ function escapeShell(value) {
 }
 function sanitizeName(name) {
     return name.replace(/[^a-zA-Z0-9._-]/g, '-');
+}
+// Redact common token formats so we don't leak secrets in logs or issues.
+function redactSecrets(value) {
+    if (!value)
+        return value;
+    let out = value;
+    out = out.replace(/x-access-token:[^@\s]+@/g, 'x-access-token:[REDACTED]@');
+    out = out.replace(/gh[soupm]_[A-Za-z0-9]{12,}/g, 'gh*_REDACTED');
+    return out;
 }
 function failAndExit(message) {
     console.error(message);
@@ -33670,7 +33683,9 @@ exports.createIssueForPackage = createIssueForPackage;
 exports.createPullRequestWithLabels = createPullRequestWithLabels;
 exports.findOpenPullRequestByHead = findOpenPullRequestByHead;
 const core = __importStar(__nccwpck_require__(7484));
+const actionUtils_1 = __nccwpck_require__(7740);
 async function createIssueForPackage({ octo, targetRepo, token, pkgName, message, phase }) {
+    const safeMessage = (0, actionUtils_1.redactSecrets)(message);
     if (!token) {
         console.warn(`Cannot create issue for ${pkgName} (${phase}): no token available.`);
         return null;
@@ -33678,7 +33693,7 @@ async function createIssueForPackage({ octo, targetRepo, token, pkgName, message
     try {
         const [owner, repo] = targetRepo.split('/');
         const title = `melange updater failure for ${pkgName}`;
-        const body = `melange updater encountered an error ${phase ? `during ${phase} ` : ''}for package **${pkgName}**.\n\nError: ${message}`;
+        const body = `melange updater encountered an error ${phase ? `during ${phase} ` : ''}for package **${pkgName}**.\n\nError: ${safeMessage}`;
         const { data: issue } = await octo.rest.issues.create({ owner, repo, title, body });
         console.log(`Created issue for ${pkgName}: ${title}`);
         return issue;

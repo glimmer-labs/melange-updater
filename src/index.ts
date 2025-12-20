@@ -12,7 +12,7 @@ import { findMelangePackages, applyVersionToPackage, updateExpectedCommitInFile 
 import { getGitRepoFromPipeline, getGitBranchFromPipeline } from './lib/pipeline';
 import { resolveExpectedCommit } from './lib/commitResolver';
 import { applyTransforms, shouldIgnoreVersion } from './lib/transform';
-import { run, execGetOutput, escapeShell, sanitizeName, failAndExit, writeSummary, ensureCleanWorkingTree } from './lib/actionUtils';
+import { run, execGetOutput, escapeShell, sanitizeName, failAndExit, writeSummary, ensureCleanWorkingTree, redactSecrets } from './lib/actionUtils';
 import { createIssueForPackage, createPullRequestWithLabels, findOpenPullRequestByHead } from './lib/githubActions';
 import { PackageInfo, UpdateConfig, UpdateEntry, UpdateMap } from './types';
 import { normalizeKeys } from './lib/updateConfig';
@@ -187,10 +187,11 @@ async function main(): Promise<void> {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.warn(`failed to process package ${name}: ${msg}`);
-      packageErrors.push({ name, phase: 'version discovery', message: msg });
+      const safeMsg = redactSecrets(msg);
+      console.warn(`failed to process package ${name}: ${safeMsg}`);
+      packageErrors.push({ name, phase: 'version discovery', message: safeMsg });
       if (!dryRun && !preview) {
-        await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: msg, phase: 'version discovery' });
+        await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'version discovery' });
       }
     }
   }
@@ -294,10 +295,11 @@ async function main(): Promise<void> {
         run(`git push ${remoteUrl} ${branch}`, { cwd: absRepoPath });
       } catch (pushErr) {
         const msg = pushErr instanceof Error ? pushErr.message : String(pushErr);
-        console.warn(`Failed to push branch for ${name}: ${msg}`);
+        const safeMsg = redactSecrets(msg);
+        console.warn(`Failed to push branch for ${name}: ${safeMsg}`);
         failedPackages.push(name);
-        packageErrors.push({ name, phase: 'git push', message: msg });
-        await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: msg, phase: 'git push' });
+        packageErrors.push({ name, phase: 'git push', message: safeMsg });
+        await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'git push' });
         run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
         continue;
       }
@@ -318,9 +320,10 @@ async function main(): Promise<void> {
       run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.warn(`Failed to create PR for ${name}: ${msg}`);
-      packageErrors.push({ name, phase: 'PR creation', message: msg });
-      await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: msg, phase: 'PR creation' });
+      const safeMsg = redactSecrets(msg);
+      console.warn(`Failed to create PR for ${name}: ${safeMsg}`);
+      packageErrors.push({ name, phase: 'PR creation', message: safeMsg });
+      await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'PR creation' });
       try {
         run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
       } catch (_) {}
