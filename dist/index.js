@@ -33262,10 +33262,6 @@ async function main() {
                 console.warn(`Package metadata for ${name} not found; skipping.`);
                 continue;
             }
-            (0, melange_1.applyVersionToPackage)(pkg, u.to);
-            if (u.commit) {
-                (0, melange_1.updateExpectedCommitInFile)(pkg.file, u.commit);
-            }
             const safeName = (0, actionUtils_1.sanitizeName)(name);
             const branch = `melange-update-${safeName}`;
             const remoteHead = (0, actionUtils_1.execGetOutput)(`git ls-remote ${remoteUrl} refs/heads/${branch}`, absRepoPath).trim();
@@ -33278,6 +33274,10 @@ async function main() {
             else {
                 // Fresh branch from default branch.
                 (0, actionUtils_1.run)(`git checkout -B ${branch} ${defaultBranch}`, { cwd: absRepoPath });
+            }
+            (0, melange_1.applyVersionToPackage)(pkg, u.to);
+            if (u.commit) {
+                (0, melange_1.updateExpectedCommitInFile)(pkg.file, u.commit);
             }
             (0, actionUtils_1.run)('git add -A', { cwd: absRepoPath });
             const status = (0, actionUtils_1.execGetOutput)('git status --porcelain', absRepoPath).trim();
@@ -33390,6 +33390,9 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 exports.execGetOutput = execGetOutput;
@@ -33401,6 +33404,7 @@ exports.writeSummary = writeSummary;
 exports.ensureCleanWorkingTree = ensureCleanWorkingTree;
 const child_process_1 = __nccwpck_require__(5317);
 const core = __importStar(__nccwpck_require__(7484));
+const fs_1 = __importDefault(__nccwpck_require__(9896));
 function run(cmd, opts = {}) {
     console.log('>', cmd);
     (0, child_process_1.execSync)(cmd, { stdio: 'inherit', ...opts });
@@ -33438,13 +33442,29 @@ function failAndExit(message) {
     }
     process.exit(1);
 }
+const SUMMARY_MARKER = '<!-- melange-updater-summary -->';
+let summaryWritten = false;
 async function writeSummary({ mode, updates = {}, createdPRs = [], manualUpdates = [], failedPackages = [], packageErrors = [] }) {
     // Skip when running outside of GitHub Actions where GITHUB_STEP_SUMMARY is missing.
     if (!core || !core.summary || !process.env.GITHUB_STEP_SUMMARY)
         return;
+    if (summaryWritten)
+        return;
+    const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+    if (summaryFile && fs_1.default.existsSync(summaryFile)) {
+        try {
+            const existing = fs_1.default.readFileSync(summaryFile, 'utf8');
+            if (existing.includes(SUMMARY_MARKER))
+                return;
+        }
+        catch (_) {
+            // ignore read errors
+        }
+    }
     const s = core.summary;
     const updateEntries = Object.entries(updates || {});
     s.clear();
+    s.addRaw(`${SUMMARY_MARKER}\n`);
     s.addHeading('Melange updater');
     if (mode)
         s.addRaw(`Mode: ${mode}\n\n`);
@@ -33480,6 +33500,7 @@ async function writeSummary({ mode, updates = {}, createdPRs = [], manualUpdates
         s.addList(packageErrors.map((e) => `${e.name} (${e.phase}): ${e.message}`));
     }
     await s.write();
+    summaryWritten = true;
 }
 function ensureCleanWorkingTree(cwd, execGetOutputFn) {
     const status = execGetOutputFn('git status --porcelain', cwd);

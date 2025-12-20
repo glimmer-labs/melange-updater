@@ -260,11 +260,6 @@ async function main(): Promise<void> {
         continue;
       }
 
-      applyVersionToPackage(pkg, u.to);
-      if (u.commit) {
-        updateExpectedCommitInFile(pkg.file, u.commit);
-      }
-
       const safeName = sanitizeName(name);
       const branch = `melange-update-${safeName}`;
 
@@ -278,6 +273,11 @@ async function main(): Promise<void> {
       } else {
         // Fresh branch from default branch.
         run(`git checkout -B ${branch} ${defaultBranch}`, { cwd: absRepoPath });
+      }
+
+      applyVersionToPackage(pkg, u.to);
+      if (u.commit) {
+        updateExpectedCommitInFile(pkg.file, u.commit);
       }
 
       run('git add -A', { cwd: absRepoPath });
