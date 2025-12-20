@@ -68,6 +68,7 @@ async function main(): Promise<void> {
   const octo = new Octokit({ auth: token });
   const createdPRs: { name: string; url: string }[] = [];
   const failedPackages: string[] = [];
+  const packageErrors: { name: string; phase: string; message: string }[] = [];
 
   for (const [name, pkg] of Object.entries(packages)) {
     try {
@@ -187,6 +188,7 @@ async function main(): Promise<void> {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn(`failed to process package ${name}: ${msg}`);
+      packageErrors.push({ name, phase: 'version discovery', message: msg });
       if (!dryRun && !preview) {
         await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: msg, phase: 'version discovery' });
       }
@@ -201,14 +203,14 @@ async function main(): Promise<void> {
   if (updatesCount === 0) {
     console.log('No updates detected. Exiting without creating a branch.');
     if (dryRun) console.log('Dry run mode: nothing was changed.');
-    await writeSummary({ mode: 'no-updates', updates });
+    await writeSummary({ mode: 'no-updates', updates, packageErrors });
     return;
   }
 
   if (dryRun) {
     console.log('Dry run enabled — the following updates would be applied:');
     console.log(JSON.stringify(updates, null, 2));
-    await writeSummary({ mode: 'dry-run', updates, manualUpdates });
+    await writeSummary({ mode: 'dry-run', updates, manualUpdates, packageErrors });
     return;
   }
 
@@ -223,13 +225,13 @@ async function main(): Promise<void> {
       }
     }
     console.log('Preview mode: updates applied locally; no branch/commit/push/PR.');
-    await writeSummary({ mode: 'preview', updates, manualUpdates });
+    await writeSummary({ mode: 'preview', updates, manualUpdates, packageErrors });
     return;
   }
 
   if (nonManualUpdates.length === 0) {
     console.log('Only manual updates detected; nothing to auto-apply.');
-    await writeSummary({ mode: 'manual-only', updates, manualUpdates });
+    await writeSummary({ mode: 'manual-only', updates, manualUpdates, packageErrors });
     return;
   }
 
@@ -273,6 +275,7 @@ async function main(): Promise<void> {
         const msg = pushErr instanceof Error ? pushErr.message : String(pushErr);
         console.warn(`Failed to push branch for ${name}: ${msg}`);
         failedPackages.push(name);
+        packageErrors.push({ name, phase: 'git push', message: msg });
         await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: msg, phase: 'git push' });
         run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
         continue;
@@ -288,6 +291,7 @@ async function main(): Promise<void> {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn(`Failed to create PR for ${name}: ${msg}`);
+       packageErrors.push({ name, phase: 'PR creation', message: msg });
       await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: msg, phase: 'PR creation' });
       try {
         run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
@@ -310,7 +314,7 @@ async function main(): Promise<void> {
 
   console.log('Done.');
 
-  await writeSummary({ mode: 'pr', updates, createdPRs, manualUpdates, failedPackages });
+  await writeSummary({ mode: 'pr', updates, createdPRs, manualUpdates, failedPackages, packageErrors });
 }
 
 main().catch((err) => {

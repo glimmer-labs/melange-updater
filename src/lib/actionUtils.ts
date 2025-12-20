@@ -39,9 +39,10 @@ interface WriteSummaryInput {
   createdPRs?: { name: string; url: string }[];
   manualUpdates?: Array<[string, UpdateEntry]>;
   failedPackages?: string[];
+  packageErrors?: { name: string; phase: string; message: string }[];
 }
 
-export async function writeSummary({ mode, updates = {}, createdPRs = [], manualUpdates = [], failedPackages = [] }: WriteSummaryInput): Promise<void> {
+export async function writeSummary({ mode, updates = {}, createdPRs = [], manualUpdates = [], failedPackages = [], packageErrors = [] }: WriteSummaryInput): Promise<void> {
   // Skip when running outside of GitHub Actions where GITHUB_STEP_SUMMARY is missing.
   if (!core || !core.summary || !process.env.GITHUB_STEP_SUMMARY) return;
   const s = core.summary;
@@ -79,6 +80,11 @@ export async function writeSummary({ mode, updates = {}, createdPRs = [], manual
   if (failedPackages.length > 0) {
     s.addHeading('Failures');
     s.addList(failedPackages);
+  }
+
+  if (packageErrors.length > 0) {
+    s.addHeading('Errors');
+    s.addList(packageErrors.map((e) => `${e.name} (${e.phase}): ${e.message}`));
   }
 
   await s.write();
