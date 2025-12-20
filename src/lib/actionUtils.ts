@@ -1,5 +1,6 @@
 import { execSync, ExecSyncOptions } from 'child_process';
 import * as core from '@actions/core';
+import fs from 'fs';
 import { UpdateEntry, UpdateMap } from '../types';
 
 export function run(cmd: string, opts: ExecSyncOptions = {}): void {
@@ -51,13 +52,28 @@ interface WriteSummaryInput {
   packageErrors?: { name: string; phase: string; message: string }[];
 }
 
+const SUMMARY_MARKER = '<!-- melange-updater-summary -->';
+let summaryWritten = false;
+
 export async function writeSummary({ mode, updates = {}, createdPRs = [], manualUpdates = [], failedPackages = [], packageErrors = [] }: WriteSummaryInput): Promise<void> {
   // Skip when running outside of GitHub Actions where GITHUB_STEP_SUMMARY is missing.
   if (!core || !core.summary || !process.env.GITHUB_STEP_SUMMARY) return;
+  if (summaryWritten) return;
+
+  const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+  if (summaryFile && fs.existsSync(summaryFile)) {
+    try {
+      const existing = fs.readFileSync(summaryFile, 'utf8');
+      if (existing.includes(SUMMARY_MARKER)) return;
+    } catch (_) {
+      // ignore read errors
+    }
+  }
   const s = core.summary;
   const updateEntries = Object.entries(updates || {});
 
   s.clear();
+  s.addRaw(`${SUMMARY_MARKER}\n`);
   s.addHeading('Melange updater');
   if (mode) s.addRaw(`Mode: ${mode}\n\n`);
 
@@ -97,6 +113,7 @@ export async function writeSummary({ mode, updates = {}, createdPRs = [], manual
   }
 
   await s.write();
+  summaryWritten = true;
 }
 
 export type ExecOutputFn = (cmd: string, cwd?: string) => string;
