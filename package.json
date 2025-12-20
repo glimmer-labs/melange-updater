@@ -1,0 +1,22 @@
+{
+  "name": "wolfictl-update-action",
+  "version": "0.1.0",
+  "description": "Node 24 replacement for wolfictl update (minimal implementation)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "build": "ncc build src/index.js -o dist"
+  },
+  "dependencies": {
+    "@octokit/rest": "^22.0.1",
+    "minimist": "^1.2.8",
+    "axios": "^1.13.0",
+    "js-yaml": "^4.1.0",
+    "glob": "^13.0.0",
+    "semver": "^7.7.3",
+    "@actions/core": "^1.11.1"
+  },
+  "devDependencies": {
+    "@vercel/ncc": "^0.38.1"
+  }
+}
