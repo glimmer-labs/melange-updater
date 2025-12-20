@@ -36155,6 +36155,99 @@ module.exports = {
 
 /***/ }),
 
+/***/ 9742:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { execSync } = __nccwpck_require__(5317);
+const core = __nccwpck_require__(7484);
+
+function run(cmd, opts = {}) {
+  console.log('>', cmd);
+  return execSync(cmd, { stdio: 'inherit', ...opts });
+}
+
+function execGetOutput(cmd, cwd) {
+  try {
+    return execSync(cmd, { cwd, encoding: 'utf8' });
+  } catch (e) {
+    return '';
+  }
+}
+
+function escapeShell(s) {
+  return s.replace(/"/g, '\\"');
+}
+
+function sanitizeName(name) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '-');
+}
+
+function failAndExit(message) {
+  console.error(message);
+  try {
+    core.setFailed(message);
+  } catch (_) {
+    // core may be unavailable in CLI mode
+  }
+  process.exit(1);
+}
+
+async function writeSummary({ mode, updates = {}, createdPRs = [], manualUpdates = [], failedPackages = [] }) {
+  // Skip when running outside of GitHub Actions where GITHUB_STEP_SUMMARY is missing.
+  if (!core || !core.summary || !process.env.GITHUB_STEP_SUMMARY) return;
+  const s = core.summary;
+  const updateEntries = Object.entries(updates || {});
+
+  s.clear();
+  s.addHeading('Melange updater');
+  if (mode) s.addRaw(`Mode: ${mode}\n\n`);
+
+  if (updateEntries.length > 0) {
+    s.addTable([
+      [
+        { data: 'Package', header: true },
+        { data: 'From', header: true },
+        { data: 'To', header: true },
+        { data: 'Manual', header: true },
+        { data: 'Commit', header: true },
+      ],
+      ...updateEntries.map(([name, u]) => [name, u.from || '', u.to || '', u.manual ? 'yes' : 'no', u.commit || '']),
+    ]);
+  } else {
+    s.addRaw('No updates detected.\n\n');
+  }
+
+  if (createdPRs.length > 0) {
+    s.addHeading('Created PRs');
+    s.addList(createdPRs.map((p) => `${p.name}: ${p.url}`));
+  }
+
+  if (manualUpdates.length > 0) {
+    s.addHeading('Manual updates');
+    s.addList(manualUpdates.map(([name, u]) => `${name}: ${u.from || ''} -> ${u.to || ''}`));
+  }
+
+  if (failedPackages.length > 0) {
+    s.addHeading('Failures');
+    s.addList(failedPackages);
+  }
+
+  await s.write();
+}
+
+function ensureCleanWorkingTree(cwd, execGetOutputFn) {
+  const status = execGetOutputFn('git status --porcelain', cwd);
+  if (status.trim()) {
+    return 'Working tree is dirty. Please ensure a clean state before running the action.';
+  }
+  return '';
+}
+
+module.exports = { run, execGetOutput, escapeShell, sanitizeName, failAndExit, writeSummary, ensureCleanWorkingTree };
+
+
+/***/ }),
+
 /***/ 2410:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -36259,6 +36352,56 @@ module.exports = { getLatestGitTag };
 
 /***/ }),
 
+/***/ 9831:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const core = __nccwpck_require__(7484);
+
+async function createIssueForPackage({ octo, targetRepo, token, pkgName, message, phase }) {
+  if (!token) {
+    console.warn(`Cannot create issue for ${pkgName} (${phase}): no token available.`);
+    return null;
+  }
+  try {
+    const [owner, repo] = targetRepo.split('/');
+    const title = `melange updater failure for ${pkgName}`;
+    const body = `melange updater encountered an error ${phase ? `during ${phase} ` : ''}for package **${pkgName}**.\n\nError: ${message}`;
+    const { data: issue } = await octo.rest.issues.create({ owner, repo, title, body });
+    console.log(`Created issue for ${pkgName}: ${title}`);
+    return issue;
+  } catch (e) {
+    const msg = e && e.message ? e.message : String(e);
+    console.warn(`Failed to create issue for ${pkgName}: ${msg}`);
+    try {
+      core.warning(msg);
+    } catch (_) {}
+    return null;
+  }
+}
+
+async function createPullRequestWithLabels({ octo, owner, repo, title, head, base, body, labels = [] }) {
+  const { data: pr } = await octo.rest.pulls.create({ owner, repo, title, head, base, body });
+  console.log('Created PR:', pr.html_url);
+  if (labels.length > 0) {
+    try {
+      await octo.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels });
+      console.log(`Added labels to PR ${pr.number}: ${labels.join(', ')}`);
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e);
+      console.warn(`Failed adding labels for PR ${pr.number}: ${msg}`);
+      try {
+        core.warning(msg);
+      } catch (_) {}
+    }
+  }
+  return pr;
+}
+
+module.exports = { createIssueForPackage, createPullRequestWithLabels };
+
+
+/***/ }),
+
 /***/ 9360:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -36354,7 +36497,8 @@ function updateExpectedCommitInFile(filePath, commitSha) {
     for (let j = i + 1; j < lines.length; j++) {
       const line = lines[j];
       if (!line.trim()) continue;
-      if (/^(\s*)-\s+uses:/.test(line) && (RegExp.$1 || '').length <= baseIndent.length) break;
+      const nestedUses = line.match(/^(\s*)-\s+uses:/);
+      if (nestedUses && (nestedUses[1] || '').length <= baseIndent.length) break;
 
       const withMatch = line.match(/^(\s*)with:\s*$/);
       if (withMatch) {
@@ -36449,7 +36593,36 @@ function updatePackageEpochInFile(filePath, newEpoch = 0) {
   return true;
 }
 
-module.exports = { findMelangePackages, writeMelangePackage, updatePackageVersionInFile, updatePackageEpochInFile, updateExpectedCommitInFile };
+function applyVersionToPackage(pkg, newVersion) {
+  // Try targeted in-place replacement to preserve formatting
+  const versionUpdated = updatePackageVersionInFile(pkg.file, newVersion);
+  const epochUpdated = updatePackageEpochInFile(pkg.file, 0);
+  if (versionUpdated || epochUpdated) return true;
+
+  // Fallback to full YAML write if patterns not found
+  if (pkg.doc.package && pkg.doc.package.version) {
+    pkg.doc.package.version = newVersion;
+    if (typeof pkg.doc.package.epoch !== 'undefined') pkg.doc.package.epoch = 0;
+    writeMelangePackage(pkg);
+    return true;
+  }
+  if (pkg.doc.Package && pkg.doc.Package.version) {
+    pkg.doc.Package.version = newVersion;
+    if (typeof pkg.doc.Package.epoch !== 'undefined') pkg.doc.Package.epoch = 0;
+    writeMelangePackage(pkg);
+    return true;
+  }
+  return false;
+}
+
+module.exports = {
+  findMelangePackages,
+  writeMelangePackage,
+  updatePackageVersionInFile,
+  updatePackageEpochInFile,
+  updateExpectedCommitInFile,
+  applyVersionToPackage,
+};
 
 
 /***/ }),
@@ -56314,61 +56487,19 @@ var __webpack_exports__ = {};
 
 const fs = __nccwpck_require__(9896);
 const path = __nccwpck_require__(6928);
-const { execSync } = __nccwpck_require__(5317);
 const minimist = __nccwpck_require__(994);
 const core = __nccwpck_require__(7484);
 const { Octokit } = __nccwpck_require__(9380);
 const { getLatestReleaseVersion } = __nccwpck_require__(8792);
 const { getLatestGithubRelease } = __nccwpck_require__(9360);
 const { getLatestGitTag } = __nccwpck_require__(8720);
-const { findMelangePackages, writeMelangePackage, updatePackageVersionInFile, updatePackageEpochInFile, updateExpectedCommitInFile } = __nccwpck_require__(4776);
+const { findMelangePackages, applyVersionToPackage, updateExpectedCommitInFile } = __nccwpck_require__(4776);
 const { getGitRepoFromPipeline, getGitBranchFromPipeline } = __nccwpck_require__(7419);
 const { resolveExpectedCommit } = __nccwpck_require__(2410);
 const { applyTransforms, shouldIgnoreVersion } = __nccwpck_require__(437);
+const { run, execGetOutput, escapeShell, sanitizeName, failAndExit, writeSummary, ensureCleanWorkingTree } = __nccwpck_require__(9742);
+const { createIssueForPackage, createPullRequestWithLabels } = __nccwpck_require__(9831);
 const semver = __nccwpck_require__(2088);
-
-function run(cmd, opts = {}) {
-  console.log('>', cmd);
-  return execSync(cmd, { stdio: 'inherit', ...opts });
-}
-
-function execGetOutput(cmd, cwd) {
-  try {
-    return execSync(cmd, { cwd, encoding: 'utf8' });
-  } catch (e) {
-    return '';
-  }
-}
-
-function escapeShell(s) {
-  return s.replace(/"/g, '\\"');
-}
-
-function sanitizeName(name) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '-');
-}
-
-function applyVersionToPackage(pkg, newVersion) {
-  // Try targeted in-place replacement to preserve formatting
-  const versionUpdated = updatePackageVersionInFile(pkg.file, newVersion);
-  const epochUpdated = updatePackageEpochInFile(pkg.file, 0);
-  if (versionUpdated || epochUpdated) return true;
-
-  // Fallback to full YAML write if patterns not found
-  if (pkg.doc.package && pkg.doc.package.version) {
-    pkg.doc.package.version = newVersion;
-    if (typeof pkg.doc.package.epoch !== 'undefined') pkg.doc.package.epoch = 0;
-    writeMelangePackage(pkg);
-    return true;
-  }
-  if (pkg.doc.Package && pkg.doc.Package.version) {
-    pkg.doc.Package.version = newVersion;
-    if (typeof pkg.doc.Package.epoch !== 'undefined') pkg.doc.Package.epoch = 0;
-    writeMelangePackage(pkg);
-    return true;
-  }
-  return false;
-}
 
 async function main() {
   // Support both CLI invocation (minimist) and GitHub Action inputs via env/with.
@@ -56396,16 +56527,13 @@ async function main() {
   const githubLabels = (argv['github-labels'] || input('github-labels') || '').split(',').map(s => s.trim()).filter(Boolean);
 
   if (!targetRepo) {
-    console.error('No target repo specified. Use --target-repo owner/repo');
-    process.exit(1);
+    failAndExit('No target repo specified. Use --target-repo owner/repo');
   }
   if (!/^[^\s/]+\/[^\s/]+$/.test(targetRepo)) {
-    console.error('Invalid target repo format. Expected owner/repo');
-    process.exit(1);
+    failAndExit('Invalid target repo format. Expected owner/repo');
   }
   if (!token && !dryRun && !preview) {
-    console.error('No token provided. Use --token or set GITHUB_TOKEN (or run with --dry-run/--preview/--no-commit)');
-    process.exit(1);
+    failAndExit('No token provided. Use --token or set GITHUB_TOKEN (or run with --dry-run/--preview/--no-commit)');
   }
 
   const absRepoPath = path.resolve(process.cwd(), repoPath);
@@ -56421,31 +56549,6 @@ async function main() {
   const { normalizeKeys } = __nccwpck_require__(4826);
   const createdPRs = [];
   const failedPackages = [];
-
-  async function createIssueForPackage(pkgName, message, phase) {
-    if (!token) {
-      console.warn(`Cannot create issue for ${pkgName} (${phase}): no token available.`);
-      return;
-    }
-    try {
-      const [owner, repo] = targetRepo.split('/');
-      const title = `melange updater failure for ${pkgName}`;
-      const body = `melange updater encountered an error ${phase ? `during ${phase} ` : ''}for package **${pkgName}**.\n\nError: ${message}`;
-      await octo.rest.issues.create({ owner, repo, title, body });
-      console.log(`Created issue for ${pkgName}: ${title}`);
-    } catch (e) {
-      console.warn(`Failed to create issue for ${pkgName}: ${e.message}`);
-    }
-  }
-
-  function ensureCleanWorkingTree() {
-    const status = execGetOutput('git status --porcelain', absRepoPath);
-    if (status.trim()) {
-      console.error('Working tree is dirty. Please ensure a clean state before running the action.');
-      return false;
-    }
-    return true;
-  }
 
   for (const [name, pkg] of Object.entries(packages)) {
     try {
@@ -56571,16 +56674,21 @@ async function main() {
     } catch (e) {
       console.warn(`failed to process package ${name}: ${e.message}`);
       if (!dryRun && !preview) {
-        await createIssueForPackage(name, e.message, 'version discovery');
+        await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: e.message, phase: 'version discovery' });
       }
     }
   }
 
   // If no updates detected, exit without creating any branch or committing
   const updatesCount = Object.keys(updates).length;
+  const updateEntries = Object.entries(updates);
+  const manualUpdates = updateEntries.filter(([, u]) => u.manual);
+  const nonManualUpdates = updateEntries.filter(([, u]) => !u.manual);
+
   if (updatesCount === 0) {
     console.log('No updates detected. Exiting without creating a branch.');
     if (dryRun) console.log('Dry run mode: nothing was changed.');
+    await writeSummary({ mode: 'no-updates', updates });
     return;
   }
 
@@ -56588,6 +56696,7 @@ async function main() {
   if (dryRun) {
     console.log('Dry run enabled — the following updates would be applied:');
     console.log(JSON.stringify(updates, null, 2));
+    await writeSummary({ mode: 'dry-run', updates, manualUpdates });
     return;
   }
 
@@ -56603,15 +56712,15 @@ async function main() {
       }
     }
     console.log('Preview mode: updates applied locally; no branch/commit/push/PR.');
+    await writeSummary({ mode: 'preview', updates, manualUpdates });
     return;
   }
 
   // Proceed to create a PR per non-manual package update
-  const nonManualUpdates = Object.entries(updates).filter(([, u]) => !u.manual);
-  const manualUpdates = Object.entries(updates).filter(([, u]) => u.manual);
 
   if (nonManualUpdates.length === 0) {
     console.log('Only manual updates detected; nothing to auto-apply.');
+    await writeSummary({ mode: 'manual-only', updates, manualUpdates });
     return;
   }
 
@@ -56621,8 +56730,9 @@ async function main() {
   const startingBranch = execGetOutput('git rev-parse --abbrev-ref HEAD', absRepoPath).trim() || defaultBranch;
   const remoteUrl = `https://x-access-token:${token}@github.com/${targetRepo}.git`;
 
-  if (!ensureCleanWorkingTree()) {
-    return;
+  const dirtyReason = ensureCleanWorkingTree(absRepoPath, execGetOutput);
+  if (dirtyReason) {
+    failAndExit(dirtyReason);
   }
 
   run(`git config user.name "${escapeShell(gitAuthorName)}"`, { cwd: absRepoPath });
@@ -56655,7 +56765,7 @@ async function main() {
       } catch (pushErr) {
         console.warn(`Failed to push branch for ${name}: ${pushErr.message}`);
         failedPackages.push(name);
-        await createIssueForPackage(name, pushErr.message, 'git push');
+        await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: pushErr.message, phase: 'git push' });
         run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
         continue;
       }
@@ -56663,24 +56773,14 @@ async function main() {
       const prTitle = `Automated update for ${name}`;
       const prBody = `This PR updates ${name}: ${u.from} -> ${u.to}${githubLabels.length ? `\n\nLabels: ${githubLabels.join(', ')}` : ''}`;
 
-      const { data: pr } = await octo.rest.pulls.create({ owner, repo, title: prTitle, head: branch, base: defaultBranch, body: prBody });
-      console.log('Created PR:', pr.html_url);
+      const pr = await createPullRequestWithLabels({ octo, owner, repo, title: prTitle, head: branch, base: defaultBranch, body: prBody, labels: githubLabels });
       createdPRs.push({ name, url: pr.html_url });
-
-      if (githubLabels.length > 0) {
-        try {
-          await octo.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: githubLabels });
-          console.log(`Added labels to PR for ${name}: ${githubLabels.join(', ')}`);
-        } catch (labelErr) {
-          console.warn(`Failed adding labels for ${name}: ${labelErr.message}`);
-        }
-      }
 
       // return to default branch for the next package
       run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
     } catch (e) {
       console.warn(`Failed to create PR for ${name}: ${e.message}`);
-      await createIssueForPackage(name, e.message, 'PR creation');
+      await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: e.message, phase: 'PR creation' });
       try { run(`git checkout ${defaultBranch}`, { cwd: absRepoPath }); } catch (_) {}
       failedPackages.push(name);
     }
@@ -56700,9 +56800,19 @@ async function main() {
   }
 
   console.log('Done.');
+
+  await writeSummary({ mode: 'pr', updates, createdPRs, manualUpdates, failedPackages });
 }
 
-main().catch(err => { console.error(err); process.exit(1); });
+main().catch(err => {
+  console.error(err);
+  try {
+    core.setFailed(err.message || String(err));
+  } catch (_) {
+    // ignore if core is unavailable
+  }
+  process.exit(1);
+});
 
 module.exports = __webpack_exports__;
 /******/ })()

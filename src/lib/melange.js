@@ -45,7 +45,8 @@ function updateExpectedCommitInFile(filePath, commitSha) {
     for (let j = i + 1; j < lines.length; j++) {
       const line = lines[j];
       if (!line.trim()) continue;
-      if (/^(\s*)-\s+uses:/.test(line) && (RegExp.$1 || '').length <= baseIndent.length) break;
+      const nestedUses = line.match(/^(\s*)-\s+uses:/);
+      if (nestedUses && (nestedUses[1] || '').length <= baseIndent.length) break;
 
       const withMatch = line.match(/^(\s*)with:\s*$/);
       if (withMatch) {
@@ -140,4 +141,33 @@ function updatePackageEpochInFile(filePath, newEpoch = 0) {
   return true;
 }
 
-module.exports = { findMelangePackages, writeMelangePackage, updatePackageVersionInFile, updatePackageEpochInFile, updateExpectedCommitInFile };
+function applyVersionToPackage(pkg, newVersion) {
+  // Try targeted in-place replacement to preserve formatting
+  const versionUpdated = updatePackageVersionInFile(pkg.file, newVersion);
+  const epochUpdated = updatePackageEpochInFile(pkg.file, 0);
+  if (versionUpdated || epochUpdated) return true;
+
+  // Fallback to full YAML write if patterns not found
+  if (pkg.doc.package && pkg.doc.package.version) {
+    pkg.doc.package.version = newVersion;
+    if (typeof pkg.doc.package.epoch !== 'undefined') pkg.doc.package.epoch = 0;
+    writeMelangePackage(pkg);
+    return true;
+  }
+  if (pkg.doc.Package && pkg.doc.Package.version) {
+    pkg.doc.Package.version = newVersion;
+    if (typeof pkg.doc.Package.epoch !== 'undefined') pkg.doc.Package.epoch = 0;
+    writeMelangePackage(pkg);
+    return true;
+  }
+  return false;
+}
+
+module.exports = {
+  findMelangePackages,
+  writeMelangePackage,
+  updatePackageVersionInFile,
+  updatePackageEpochInFile,
+  updateExpectedCommitInFile,
+  applyVersionToPackage,
+};
