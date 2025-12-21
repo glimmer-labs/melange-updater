@@ -28,7 +28,8 @@ export function redactSecrets(value: string): string {
   if (!value) return value;
   let out = value;
   out = out.replace(/x-access-token:[^@\s]+@/g, 'x-access-token:[REDACTED]@');
-  out = out.replace(/gh[soupm]_[A-Za-z0-9]{12,}/g, 'gh*_REDACTED');
+  out = out.replace(/(gh[pso]_|github_pat_)[A-Za-z0-9_\-]{12,}/g, 'gh*_REDACTED');
+  out = out.replace(/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, 'jwt_REDACTED');
   return out;
 }
 

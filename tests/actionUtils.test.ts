@@ -23,9 +23,16 @@ describe('action utils', () => {
   });
 
   it('redacts common token shapes', () => {
-    const input = 'push failed to https://x-access-token:ghs_ABC1234567890@github.com/repo.git';
+    const input = [
+      'https://x-access-token:ghs_ABC1234567890@github.com/repo.git',
+      'token ghp_abcdefghijklmnopqrstuvwxyz0123456789',
+      'pat github_pat_11AABBCC1234567890XYZ',
+      'jwt eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
+    ].join(' | ');
     const out = redactSecrets(input);
-    expect(out).not.toContain('ghs_');
+    expect(out).not.toMatch(/gh[sop]_/);
+    expect(out).not.toContain('github_pat_');
+    expect(out).not.toContain('eyJhbGci');
     expect(out).toContain('x-access-token:[REDACTED]@');
   });
 });
