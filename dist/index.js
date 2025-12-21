@@ -33714,6 +33714,13 @@ async function createIssueForPackage({ octo, targetRepo, token, pkgName, message
     try {
         const [owner, repo] = targetRepo.split('/');
         const title = `melange updater failure for ${pkgName}`;
+        // Avoid duplicate issues for the same package/title if an open one already exists.
+        const existing = await octo.rest.issues.listForRepo({ owner, repo, state: 'open', per_page: 50 });
+        const dup = existing.data.find((i) => i.title === title);
+        if (dup) {
+            console.log(`Issue already exists for ${pkgName}: ${dup.html_url}`);
+            return dup;
+        }
         const body = `melange updater encountered an error ${phase ? `during ${phase} ` : ''}for package **${pkgName}**.\n\nError: ${safeMessage}`;
         const { data: issue } = await octo.rest.issues.create({ owner, repo, title, body });
         console.log(`Created issue for ${pkgName}: ${title}`);
