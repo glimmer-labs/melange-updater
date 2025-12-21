@@ -69,6 +69,7 @@ async function main(): Promise<void> {
   const createdPRs: { name: string; url: string }[] = [];
   const failedPackages: string[] = [];
   const packageErrors: { name: string; phase: string; message: string }[] = [];
+  const issueTracker = new Set<string>();
 
   for (const [name, pkg] of Object.entries(packages)) {
     try {
@@ -191,7 +192,11 @@ async function main(): Promise<void> {
       console.warn(`failed to process package ${name}: ${safeMsg}`);
       packageErrors.push({ name, phase: 'version discovery', message: safeMsg });
       if (!dryRun && !preview) {
-        await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'version discovery' });
+        const issueKey = `${name}|version discovery`;
+        if (!issueTracker.has(issueKey)) {
+          await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'version discovery' });
+          issueTracker.add(issueKey);
+        }
       }
     }
   }
@@ -299,7 +304,11 @@ async function main(): Promise<void> {
         console.warn(`Failed to push branch for ${name}: ${safeMsg}`);
         failedPackages.push(name);
         packageErrors.push({ name, phase: 'git push', message: safeMsg });
-        await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'git push' });
+        const issueKey = `${name}|git push`;
+        if (!issueTracker.has(issueKey)) {
+          await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'git push' });
+          issueTracker.add(issueKey);
+        }
         run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
         continue;
       }
@@ -323,7 +332,11 @@ async function main(): Promise<void> {
       const safeMsg = redactSecrets(msg);
       console.warn(`Failed to create PR for ${name}: ${safeMsg}`);
       packageErrors.push({ name, phase: 'PR creation', message: safeMsg });
-      await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'PR creation' });
+      const issueKey = `${name}|PR creation`;
+      if (!issueTracker.has(issueKey)) {
+        await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'PR creation' });
+        issueTracker.add(issueKey);
+      }
       try {
         run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
       } catch (_) {}

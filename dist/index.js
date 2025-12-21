@@ -33089,6 +33089,7 @@ async function main() {
     const createdPRs = [];
     const failedPackages = [];
     const packageErrors = [];
+    const issueTracker = new Set();
     for (const [name, pkg] of Object.entries(packages)) {
         try {
             const updateCfgRaw = pkg.doc.update || {};
@@ -33201,7 +33202,11 @@ async function main() {
             console.warn(`failed to process package ${name}: ${safeMsg}`);
             packageErrors.push({ name, phase: 'version discovery', message: safeMsg });
             if (!dryRun && !preview) {
-                await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'version discovery' });
+                const issueKey = `${name}|version discovery`;
+                if (!issueTracker.has(issueKey)) {
+                    await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'version discovery' });
+                    issueTracker.add(issueKey);
+                }
             }
         }
     }
@@ -33296,7 +33301,11 @@ async function main() {
                 console.warn(`Failed to push branch for ${name}: ${safeMsg}`);
                 failedPackages.push(name);
                 packageErrors.push({ name, phase: 'git push', message: safeMsg });
-                await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'git push' });
+                const issueKey = `${name}|git push`;
+                if (!issueTracker.has(issueKey)) {
+                    await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'git push' });
+                    issueTracker.add(issueKey);
+                }
                 (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
                 continue;
             }
@@ -33318,7 +33327,11 @@ async function main() {
             const safeMsg = (0, actionUtils_1.redactSecrets)(msg);
             console.warn(`Failed to create PR for ${name}: ${safeMsg}`);
             packageErrors.push({ name, phase: 'PR creation', message: safeMsg });
-            await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'PR creation' });
+            const issueKey = `${name}|PR creation`;
+            if (!issueTracker.has(issueKey)) {
+                await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'PR creation' });
+                issueTracker.add(issueKey);
+            }
             try {
                 (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
             }
@@ -33425,7 +33438,8 @@ function redactSecrets(value) {
         return value;
     let out = value;
     out = out.replace(/x-access-token:[^@\s]+@/g, 'x-access-token:[REDACTED]@');
-    out = out.replace(/gh[soupm]_[A-Za-z0-9]{12,}/g, 'gh*_REDACTED');
+    out = out.replace(/(gh[pso]_|github_pat_)[A-Za-z0-9_\-]{12,}/g, 'gh*_REDACTED');
+    out = out.replace(/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, 'jwt_REDACTED');
     return out;
 }
 function failAndExit(message) {
