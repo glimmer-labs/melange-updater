@@ -33066,8 +33066,8 @@ async function main() {
     const releaseMonitorToken = argv['release-monitor-token'] || process.env.RELEASE_MONITOR_TOKEN || getInputValue('release_monitor_token') || '';
     const gitAuthorName = argv['git-author-name'] || getInputValue('git_author_name') || 'melange-updater';
     const gitAuthorEmail = argv['git-author-email'] || getInputValue('git_author_email') || 'noreply@example.com';
-    const repoPath = argv['repo-path'] || getInputValue('repo-path') || process.env.GITHUB_WORKSPACE || '.';
-    const githubLabels = (argv['github-labels'] || getInputValue('github-labels') || '')
+    const repoPath = argv['repo-path'] || getInputValue('repo_path') || process.env.GITHUB_WORKSPACE || '.';
+    const githubLabels = (argv['github-labels'] || argv['github_labels'] || getInputValue('github_labels') || getInputValue('github-labels') || '')
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);

@@ -26,11 +26,11 @@ inputs:
     description: 'Author email to commit.'
     required: true
     default: ''
-  github-labels:
+  github_labels:
     description: 'Comma-separated labels to add to created PR.'
     required: false
     default: ''
-  repo-path:
+  repo_path:
     description: 'Path to the checked-out repository (defaults to workspace).'
     required: false
     default: '.'

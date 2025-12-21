@@ -42,8 +42,8 @@ async function main(): Promise<void> {
   const releaseMonitorToken = (argv['release-monitor-token'] as string) || process.env.RELEASE_MONITOR_TOKEN || getInputValue('release_monitor_token') || '';
   const gitAuthorName = (argv['git-author-name'] as string) || getInputValue('git_author_name') || 'melange-updater';
   const gitAuthorEmail = (argv['git-author-email'] as string) || getInputValue('git_author_email') || 'noreply@example.com';
-  const repoPath = (argv['repo-path'] as string) || getInputValue('repo-path') || process.env.GITHUB_WORKSPACE || '.';
-  const githubLabels = ((argv['github-labels'] as string) || getInputValue('github-labels') || '')
+  const repoPath = (argv['repo-path'] as string) || getInputValue('repo_path') || process.env.GITHUB_WORKSPACE || '.';
+  const githubLabels = ((argv['github-labels'] as string) || (argv['github_labels'] as string) || getInputValue('github_labels') || getInputValue('github-labels') || '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
