@@ -33060,7 +33060,7 @@ function getInputValue(name, fallback = '') {
 async function main() {
     const argv = (0, minimist_1.default)(process.argv.slice(2));
     const targetRepo = argv['target-repo'] || argv['repository'] || getInputValue('repository');
-    const token = argv['token'] || process.env.GITHUB_TOKEN || getInputValue('token');
+    const token = argv['token'] || getInputValue('token') || process.env.GITHUB_TOKEN;
     const dryRun = parseBooleanFlag(argv['dry-run']);
     const preview = parseBooleanFlag(argv['preview']) || parseBooleanFlag(argv['no-commit']);
     const releaseMonitorToken = argv['release-monitor-token'] || process.env.RELEASE_MONITOR_TOKEN || getInputValue('release_monitor_token') || '';

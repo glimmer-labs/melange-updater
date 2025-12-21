@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   const argv = minimist(process.argv.slice(2));
 
   const targetRepo = (argv['target-repo'] as string) || (argv['repository'] as string) || getInputValue('repository');
-  const token = (argv['token'] as string) || process.env.GITHUB_TOKEN || getInputValue('token');
+  const token = (argv['token'] as string) || getInputValue('token') || process.env.GITHUB_TOKEN;
   const dryRun = parseBooleanFlag(argv['dry-run']);
   const preview = parseBooleanFlag(argv['preview']) || parseBooleanFlag(argv['no-commit']);
   const releaseMonitorToken = (argv['release-monitor-token'] as string) || process.env.RELEASE_MONITOR_TOKEN || getInputValue('release_monitor_token') || '';
