@@ -34133,6 +34133,11 @@ function applyVersionTransformsList(list, v) {
     }
     return out;
 }
+function globToRegex(pat) {
+    // Escape regex meta, then convert glob asterisks to .*
+    const escaped = pat.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+    return escaped.replace(/\*/g, '.*');
+}
 function applyTransforms(updateConfig, versionStr) {
     let v = versionStr;
     if (!v)
@@ -34169,7 +34174,14 @@ function shouldIgnoreVersion(updateConfig, versionStr) {
                 return true;
         }
         catch (_) {
-            // ignore malformed regex
+            try {
+                const re = new RegExp(globToRegex(pat));
+                if (re.test(versionStr))
+                    return true;
+            }
+            catch (_) {
+                // ignore malformed regex
+            }
         }
     }
     return false;

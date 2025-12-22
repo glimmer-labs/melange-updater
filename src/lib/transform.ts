@@ -28,6 +28,12 @@ function applyVersionTransformsList(list: { match: string; replace: string }[] |
   return out;
 }
 
+function globToRegex(pat: string): string {
+  // Escape regex meta, then convert glob asterisks to .*
+  const escaped = pat.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  return escaped.replace(/\*/g, '.*');
+}
+
 export function applyTransforms(updateConfig: UpdateConfig | undefined, versionStr: string): string {
   let v = versionStr;
   if (!v) return v;
@@ -64,7 +70,12 @@ export function shouldIgnoreVersion(updateConfig: UpdateConfig | undefined, vers
       const re = new RegExp(pat);
       if (re.test(versionStr)) return true;
     } catch (_) {
-      // ignore malformed regex
+      try {
+        const re = new RegExp(globToRegex(pat));
+        if (re.test(versionStr)) return true;
+      } catch (_) {
+        // ignore malformed regex
+      }
     }
   }
   return false;

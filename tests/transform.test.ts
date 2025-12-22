@@ -21,10 +21,16 @@ describe('transform', () => {
   });
 
   it('honors ignore patterns', () => {
-    const cfg: UpdateConfig = { ignore_regex_patterns: ['^0\\.0\\.'] };
+    const cfg: UpdateConfig = { ignore_regex_patterns: ['^0\.0\.'] };
     const ignored = shouldIgnoreVersion(cfg, '0.0.9');
     const accepted = shouldIgnoreVersion(cfg, '1.0.0');
     expect(ignored).toBe(true);
     expect(accepted).toBe(false);
+  });
+
+  it('honors glob-like ignore patterns when regex is malformed', () => {
+    const cfg: UpdateConfig = { ignore_regex_patterns: ['*-alpha'] };
+    expect(shouldIgnoreVersion(cfg, '2.0.1-alpha')).toBe(true);
+    expect(shouldIgnoreVersion(cfg, '2.0.1')).toBe(false);
   });
 });
