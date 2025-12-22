@@ -21,6 +21,9 @@ describe('commitResolver', () => {
         git: {
           getRef: vi.fn().mockResolvedValue({ data: { object: { sha: 'tagsha' } } }),
         },
+        repos: {
+          getReleaseByTag: vi.fn(),
+        },
       },
     } as any;
 
@@ -66,5 +69,39 @@ describe('commitResolver', () => {
 
     expect(execSyncMock).toHaveBeenCalled();
     expect(sha).toBe('cafebabe');
+  });
+
+  it('falls back to release target_commitish when tag ref is missing', async () => {
+    execSyncMock.mockImplementationOnce(() => '') // ls-remote fallback unused here
+      .mockImplementation(() => '');
+
+    const { resolveExpectedCommit } = await import('../src/lib/commitResolver');
+    const octo = {
+      rest: {
+        git: {
+          getRef: vi
+            .fn()
+            // first call: tags/<tag> fails
+            .mockRejectedValueOnce(new Error('not found'))
+            // second call: heads/target_commitish
+            .mockResolvedValueOnce({ data: { object: { sha: 'from-head' } } }),
+        },
+        repos: {
+          getReleaseByTag: vi.fn().mockResolvedValue({ data: { target_commitish: 'main' } }),
+        },
+      },
+    } as any;
+
+    const sha = await resolveExpectedCommit({
+      source: 'github',
+      tag: 'v1',
+      owner: 'owner',
+      repo: 'repo',
+      packageName: 'pkg',
+      octo,
+    });
+
+    expect(sha).toBe('from-head');
+    expect(octo.rest.repos.getReleaseByTag).toHaveBeenCalled();
   });
 });
