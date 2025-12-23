@@ -69,6 +69,11 @@ async function main(): Promise<void> {
   const absRepoPath = path.resolve(process.cwd(), repoPath);
   console.log('Repository path:', absRepoPath);
 
+  const dockerError = ensureDockerAvailable();
+  if (dockerError) {
+    failAndExit(dockerError);
+  }
+
   const packages = findMelangePackages(absRepoPath);
   console.log('Found', Object.keys(packages).length, 'candidate melange packages');
 
@@ -226,12 +231,6 @@ async function main(): Promise<void> {
     console.log(JSON.stringify(updates, null, 2));
     await writeSummary({ mode: 'dry-run', updates, manualUpdates, packageErrors });
     return;
-  }
-
-  // All non-dry-run paths require Docker for melange bumping.
-  const dockerError = ensureDockerAvailable();
-  if (dockerError) {
-    failAndExit(dockerError);
   }
 
   if (preview) {
