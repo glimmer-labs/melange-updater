@@ -34,6 +34,14 @@ inputs:
     description: 'Path to the checked-out repository (defaults to workspace).'
     required: false
     default: '.'
+  preview:
+    description: 'Apply changes locally only (no branch/commit/push/PR).'
+    required: false
+    default: ''
+  dry_run:
+    description: 'Report planned updates only (no file changes).'
+    required: false
+    default: ''
 
 runs:
   using: 'node24'

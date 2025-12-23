@@ -49,6 +49,8 @@ jobs:
 					git_author_name: CI Bot
 					git_author_email: ci@example.com
 					github_labels: 'request-version-update,automated pr'
+					preview: 'true'        # optional: apply locally only (no branch/commit/push/PR)
+#					dry_run: 'true'        # optional: report only; no file changes
 ```
 
 Usage: local testing (direct CLI)
