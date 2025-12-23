@@ -8,11 +8,11 @@ import semver from 'semver';
 import { getLatestReleaseVersion } from './lib/releaseMonitor';
 import { getLatestGithubRelease } from './lib/githubReleases';
 import { getLatestGitTag } from './lib/gitTags';
-import { findMelangePackages, applyVersionToPackage, updateExpectedCommitInFile } from './lib/melange';
+import { findMelangePackages, bumpWithMelangeTool } from './lib/melange';
 import { getGitRepoFromPipeline, getGitBranchFromPipeline } from './lib/pipeline';
 import { resolveExpectedCommit } from './lib/commitResolver';
 import { applyTransforms, shouldIgnoreVersion } from './lib/transform';
-import { run, execGetOutput, escapeShell, sanitizeName, failAndExit, writeSummary, ensureCleanWorkingTree, redactSecrets } from './lib/actionUtils';
+import { run, execGetOutput, escapeShell, sanitizeName, failAndExit, writeSummary, ensureCleanWorkingTree, redactSecrets, ensureDockerAvailable } from './lib/actionUtils';
 import { createIssueForPackage, createPullRequestWithLabels, findOpenPullRequestByHead } from './lib/githubActions';
 import { PackageInfo, UpdateConfig, UpdateEntry, UpdateMap } from './types';
 import { normalizeKeys } from './lib/updateConfig';
@@ -220,15 +220,18 @@ async function main(): Promise<void> {
     return;
   }
 
+  // All non-dry-run paths require Docker for melange bumping.
+  const dockerError = ensureDockerAvailable();
+  if (dockerError) {
+    failAndExit(dockerError);
+  }
+
   if (preview) {
     for (const [name, u] of Object.entries(updates)) {
       if (u.manual) continue;
       const pkg = packages[name];
       if (!pkg) continue;
-      applyVersionToPackage(pkg, u.to);
-      if (u.commit) {
-        updateExpectedCommitInFile(pkg.file, u.commit);
-      }
+      bumpWithMelangeTool({ repoPath: absRepoPath, packageFile: pkg.file, version: u.to, expectedCommit: u.commit });
     }
     console.log('Preview mode: updates applied locally; no branch/commit/push/PR.');
     await writeSummary({ mode: 'preview', updates, manualUpdates, packageErrors });
@@ -280,9 +283,21 @@ async function main(): Promise<void> {
         run(`git checkout -B ${branch} ${defaultBranch}`, { cwd: absRepoPath });
       }
 
-      applyVersionToPackage(pkg, u.to);
-      if (u.commit) {
-        updateExpectedCommitInFile(pkg.file, u.commit);
+      try {
+        bumpWithMelangeTool({ repoPath: absRepoPath, packageFile: pkg.file, version: u.to, expectedCommit: u.commit });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const safeMsg = redactSecrets(msg);
+        console.warn(`${name}: melange bump failed: ${safeMsg}`);
+        failedPackages.push(name);
+        packageErrors.push({ name, phase: 'melange bump', message: safeMsg });
+        const issueKey = `${name}|melange bump`;
+        if (!issueTracker.has(issueKey)) {
+          await createIssueForPackage({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'melange bump' });
+          issueTracker.add(issueKey);
+        }
+        run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
+        continue;
       }
 
       run('git add -A', { cwd: absRepoPath });

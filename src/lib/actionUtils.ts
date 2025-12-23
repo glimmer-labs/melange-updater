@@ -23,6 +23,15 @@ export function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '-');
 }
 
+export function ensureDockerAvailable(): string {
+  try {
+    execSync('docker --version', { stdio: 'ignore' });
+    return '';
+  } catch (_) {
+    return 'Docker is required for melange bumping but is not available on this runner.';
+  }
+}
+
 // Redact common token formats so we don't leak secrets in logs or issues.
 export function redactSecrets(value: string): string {
   if (!value) return value;
