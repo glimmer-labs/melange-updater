@@ -33061,8 +33061,14 @@ async function main() {
     const argv = (0, minimist_1.default)(process.argv.slice(2));
     const targetRepo = argv['target-repo'] || argv['repository'] || getInputValue('repository');
     const token = argv['token'] || getInputValue('token') || process.env.GITHUB_TOKEN;
-    const dryRun = parseBooleanFlag(argv['dry-run']);
-    const preview = parseBooleanFlag(argv['preview']) || parseBooleanFlag(argv['no-commit']);
+    const dryRun = parseBooleanFlag(argv['dry-run']) ||
+        parseBooleanFlag(getInputValue('dry_run')) ||
+        parseBooleanFlag(getInputValue('dry-run'));
+    const preview = parseBooleanFlag(argv['preview']) ||
+        parseBooleanFlag(argv['no-commit']) ||
+        parseBooleanFlag(getInputValue('preview')) ||
+        parseBooleanFlag(getInputValue('no_commit')) ||
+        parseBooleanFlag(getInputValue('no-commit'));
     const releaseMonitorToken = argv['release-monitor-token'] || process.env.RELEASE_MONITOR_TOKEN || getInputValue('release_monitor_token') || '';
     const gitAuthorName = argv['git-author-name'] || getInputValue('git_author_name') || 'melange-updater';
     const gitAuthorEmail = argv['git-author-email'] || getInputValue('git_author_email') || 'noreply@example.com';
@@ -33227,6 +33233,11 @@ async function main() {
         await (0, actionUtils_1.writeSummary)({ mode: 'dry-run', updates, manualUpdates, packageErrors });
         return;
     }
+    // All non-dry-run paths require Docker for melange bumping.
+    const dockerError = (0, actionUtils_1.ensureDockerAvailable)();
+    if (dockerError) {
+        (0, actionUtils_1.failAndExit)(dockerError);
+    }
     if (preview) {
         for (const [name, u] of Object.entries(updates)) {
             if (u.manual)
@@ -33234,10 +33245,7 @@ async function main() {
             const pkg = packages[name];
             if (!pkg)
                 continue;
-            (0, melange_1.applyVersionToPackage)(pkg, u.to);
-            if (u.commit) {
-                (0, melange_1.updateExpectedCommitInFile)(pkg.file, u.commit);
-            }
+            (0, melange_1.bumpWithMelangeTool)({ repoPath: absRepoPath, packageFile: pkg.file, version: u.to, expectedCommit: u.commit });
         }
         console.log('Preview mode: updates applied locally; no branch/commit/push/PR.');
         await (0, actionUtils_1.writeSummary)({ mode: 'preview', updates, manualUpdates, packageErrors });
@@ -33280,9 +33288,22 @@ async function main() {
                 // Fresh branch from default branch.
                 (0, actionUtils_1.run)(`git checkout -B ${branch} ${defaultBranch}`, { cwd: absRepoPath });
             }
-            (0, melange_1.applyVersionToPackage)(pkg, u.to);
-            if (u.commit) {
-                (0, melange_1.updateExpectedCommitInFile)(pkg.file, u.commit);
+            try {
+                (0, melange_1.bumpWithMelangeTool)({ repoPath: absRepoPath, packageFile: pkg.file, version: u.to, expectedCommit: u.commit });
+            }
+            catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                const safeMsg = (0, actionUtils_1.redactSecrets)(msg);
+                console.warn(`${name}: melange bump failed: ${safeMsg}`);
+                failedPackages.push(name);
+                packageErrors.push({ name, phase: 'melange bump', message: safeMsg });
+                const issueKey = `${name}|melange bump`;
+                if (!issueTracker.has(issueKey)) {
+                    await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'melange bump' });
+                    issueTracker.add(issueKey);
+                }
+                (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
+                continue;
             }
             (0, actionUtils_1.run)('git add -A', { cwd: absRepoPath });
             const status = (0, actionUtils_1.execGetOutput)('git status --porcelain', absRepoPath).trim();
@@ -33408,6 +33429,7 @@ exports.run = run;
 exports.execGetOutput = execGetOutput;
 exports.escapeShell = escapeShell;
 exports.sanitizeName = sanitizeName;
+exports.ensureDockerAvailable = ensureDockerAvailable;
 exports.redactSecrets = redactSecrets;
 exports.failAndExit = failAndExit;
 exports.writeSummary = writeSummary;
@@ -33431,6 +33453,15 @@ function escapeShell(value) {
 }
 function sanitizeName(name) {
     return name.replace(/[^a-zA-Z0-9._-]/g, '-');
+}
+function ensureDockerAvailable() {
+    try {
+        (0, child_process_1.execSync)('docker --version', { stdio: 'ignore' });
+        return '';
+    }
+    catch (_) {
+        return 'Docker is required for melange bumping but is not available on this runner.';
+    }
 }
 // Redact common token formats so we don't leak secrets in logs or issues.
 function redactSecrets(value) {
@@ -33838,15 +33869,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.findMelangePackages = findMelangePackages;
-exports.writeMelangePackage = writeMelangePackage;
-exports.updateExpectedCommitInFile = updateExpectedCommitInFile;
-exports.updatePackageVersionInFile = updatePackageVersionInFile;
-exports.updatePackageEpochInFile = updatePackageEpochInFile;
-exports.applyVersionToPackage = applyVersionToPackage;
+exports.bumpWithMelangeTool = bumpWithMelangeTool;
 const fs_1 = __importDefault(__nccwpck_require__(9896));
 const path_1 = __importDefault(__nccwpck_require__(6928));
 const glob_1 = __nccwpck_require__(1363);
 const js_yaml_1 = __importDefault(__nccwpck_require__(4281));
+const child_process_1 = __nccwpck_require__(5317);
 function findMelangePackages(repoPath) {
     const pattern = path_1.default.join(repoPath, '**/*.yaml');
     const files = (0, glob_1.globSync)(pattern, { nodir: true, ignore: ['**/node_modules/**', '**/.git/**'] });
@@ -33866,140 +33894,11 @@ function findMelangePackages(repoPath) {
     }
     return packages;
 }
-function writeMelangePackage(pkg) {
-    const yamlStr = js_yaml_1.default.dump(pkg.doc);
-    fs_1.default.writeFileSync(pkg.file, yamlStr, 'utf8');
-}
-function updateExpectedCommitInFile(filePath, commitSha) {
-    if (!commitSha)
-        return false;
-    const raw = fs_1.default.readFileSync(filePath, 'utf8');
-    const lines = raw.split(/\r?\n/);
-    let changed = false;
-    for (let i = 0; i < lines.length; i++) {
-        const usesMatch = lines[i].match(/^(\s*)-\s+uses:\s+git-checkout/);
-        if (!usesMatch)
-            continue;
-        const baseIndent = usesMatch[1] || '';
-        let withIndent = '';
-        let branchLine = -1;
-        let expectedLine = -1;
-        let insertPos = -1;
-        for (let j = i + 1; j < lines.length; j++) {
-            const line = lines[j];
-            if (!line.trim())
-                continue;
-            const nestedUses = line.match(/^(\s*)-\s+uses:/);
-            if (nestedUses && (nestedUses[1] || '').length <= baseIndent.length)
-                break;
-            const withMatch = line.match(/^(\s*)with:\s*$/);
-            if (withMatch) {
-                withIndent = `${withMatch[1]}  `;
-                insertPos = j + 1;
-                continue;
-            }
-            if (withIndent) {
-                if (line.includes('expected-commit:')) {
-                    expectedLine = j;
-                    break;
-                }
-                if (line.includes('branch:'))
-                    branchLine = j;
-                insertPos = j + 1;
-            }
-        }
-        if (expectedLine >= 0) {
-            const indent = (lines[expectedLine].match(/^\s*/) || [''])[0];
-            lines[expectedLine] = `${indent}expected-commit: ${commitSha}`;
-            changed = true;
-        }
-        else if (withIndent) {
-            const idx = branchLine >= 0 ? branchLine + 1 : insertPos >= 0 ? insertPos : i + 1;
-            lines.splice(idx, 0, `${withIndent}expected-commit: ${commitSha}`);
-            changed = true;
-        }
-        break;
-    }
-    if (!changed)
-        return false;
-    fs_1.default.writeFileSync(filePath, lines.join('\n'), 'utf8');
-    return true;
-}
-function updatePackageVersionInFile(filePath, newVersion) {
-    const raw = fs_1.default.readFileSync(filePath, 'utf8');
-    const lines = raw.split(/\r?\n/);
-    let changed = false;
-    for (let i = 0; i < lines.length; i++) {
-        if (/^package:\s*$/.test(lines[i].trim())) {
-            for (let j = i + 1; j < lines.length; j++) {
-                const line = lines[j];
-                if (/^\S/.test(line))
-                    break;
-                const match = line.match(/^(\s+)version:\s*(.*)$/);
-                if (match) {
-                    const indent = match[1];
-                    lines[j] = `${indent}version: ${newVersion}`;
-                    changed = true;
-                    break;
-                }
-            }
-            break;
-        }
-    }
-    if (!changed)
-        return false;
-    fs_1.default.writeFileSync(filePath, lines.join('\n'), 'utf8');
-    return true;
-}
-function updatePackageEpochInFile(filePath, newEpoch = 0) {
-    const raw = fs_1.default.readFileSync(filePath, 'utf8');
-    const lines = raw.split(/\r?\n/);
-    let changed = false;
-    for (let i = 0; i < lines.length; i++) {
-        if (/^package:\s*$/.test(lines[i].trim())) {
-            for (let j = i + 1; j < lines.length; j++) {
-                const line = lines[j];
-                if (/^\S/.test(line))
-                    break;
-                const match = line.match(/^(\s+)epoch:\s*(.*)$/);
-                if (match) {
-                    const indent = match[1];
-                    const current = match[2].trim();
-                    if (current !== String(newEpoch)) {
-                        lines[j] = `${indent}epoch: ${newEpoch}`;
-                        changed = true;
-                    }
-                    break;
-                }
-            }
-            break;
-        }
-    }
-    if (!changed)
-        return false;
-    fs_1.default.writeFileSync(filePath, lines.join('\n'), 'utf8');
-    return true;
-}
-function applyVersionToPackage(pkg, newVersion) {
-    const versionUpdated = updatePackageVersionInFile(pkg.file, newVersion);
-    const epochUpdated = updatePackageEpochInFile(pkg.file, 0);
-    if (versionUpdated || epochUpdated)
-        return true;
-    if (pkg.doc.package?.version !== undefined) {
-        pkg.doc.package.version = newVersion;
-        if (typeof pkg.doc.package.epoch !== 'undefined')
-            pkg.doc.package.epoch = 0;
-        writeMelangePackage(pkg);
-        return true;
-    }
-    if (pkg.doc.Package?.version !== undefined) {
-        pkg.doc.Package.version = newVersion;
-        if (typeof pkg.doc.Package.epoch !== 'undefined')
-            pkg.doc.Package.epoch = 0;
-        writeMelangePackage(pkg);
-        return true;
-    }
-    return false;
+function bumpWithMelangeTool({ repoPath, packageFile, version, expectedCommit }) {
+    const relPath = path_1.default.relative(repoPath, packageFile);
+    const expectedArg = expectedCommit ? ` --expected-commit ${expectedCommit}` : '';
+    const cmd = `docker run --rm -v "${repoPath}":/work -w /work cgr.dev/chainguard/melange:latest bump ${relPath} ${version}${expectedArg}`;
+    (0, child_process_1.execSync)(cmd, { stdio: 'inherit' });
 }
 
 

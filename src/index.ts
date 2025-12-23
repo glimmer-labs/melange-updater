@@ -37,8 +37,16 @@ async function main(): Promise<void> {
 
   const targetRepo = (argv['target-repo'] as string) || (argv['repository'] as string) || getInputValue('repository');
   const token = (argv['token'] as string) || getInputValue('token') || process.env.GITHUB_TOKEN;
-  const dryRun = parseBooleanFlag(argv['dry-run']);
-  const preview = parseBooleanFlag(argv['preview']) || parseBooleanFlag(argv['no-commit']);
+  const dryRun =
+    parseBooleanFlag(argv['dry-run']) ||
+    parseBooleanFlag(getInputValue('dry_run')) ||
+    parseBooleanFlag(getInputValue('dry-run'));
+  const preview =
+    parseBooleanFlag(argv['preview']) ||
+    parseBooleanFlag(argv['no-commit']) ||
+    parseBooleanFlag(getInputValue('preview')) ||
+    parseBooleanFlag(getInputValue('no_commit')) ||
+    parseBooleanFlag(getInputValue('no-commit'));
   const releaseMonitorToken = (argv['release-monitor-token'] as string) || process.env.RELEASE_MONITOR_TOKEN || getInputValue('release_monitor_token') || '';
   const gitAuthorName = (argv['git-author-name'] as string) || getInputValue('git_author_name') || 'melange-updater';
   const gitAuthorEmail = (argv['git-author-email'] as string) || getInputValue('git_author_email') || 'noreply@example.com';
