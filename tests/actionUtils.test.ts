@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { sanitizeName, escapeShell, ensureCleanWorkingTree, redactSecrets } from '../src/lib/actionUtils';
+import { describe, it, expect, vi } from 'vitest';
+vi.mock('child_process', () => ({ execSync: vi.fn() }));
+import { execSync } from 'child_process';
+import { sanitizeName, escapeShell, ensureCleanWorkingTree, redactSecrets, ensureDockerAvailable } from '../src/lib/actionUtils';
 
 describe('action utils', () => {
   it('sanitizes names by replacing disallowed characters', () => {
@@ -20,6 +22,20 @@ describe('action utils', () => {
   it('returns empty string for clean working tree', () => {
     const message = ensureCleanWorkingTree('/tmp', () => '   \n');
     expect(message).toBe('');
+  });
+
+  it('reports missing docker when exec fails', () => {
+    (execSync as unknown as vi.Mock).mockImplementationOnce(() => {
+      throw new Error('no docker');
+    });
+    const msg = ensureDockerAvailable();
+    expect(msg).toContain('Docker is required');
+  });
+
+  it('returns empty string when docker is available', () => {
+    (execSync as unknown as vi.Mock).mockImplementationOnce(() => 'Docker version 24.0.0');
+    const msg = ensureDockerAvailable();
+    expect(msg).toBe('');
   });
 
   it('redacts common token shapes', () => {
