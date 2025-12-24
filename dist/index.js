@@ -33282,6 +33282,24 @@ async function main() {
                 // Reuse existing branch to avoid duplicate PRs; fetch latest state then checkout.
                 (0, actionUtils_1.run)(`git fetch ${remoteUrl} ${branch}:${branch}`, { cwd: absRepoPath });
                 (0, actionUtils_1.run)(`git checkout ${branch}`, { cwd: absRepoPath });
+                // If the branch already has the desired version, skip bump to avoid epoch churn.
+                try {
+                    const pkgDoc = (0, melange_1.loadPackageDoc)(pkg.file) || {};
+                    const branchVersion = pkgDoc.package?.version || pkgDoc.Package?.version;
+                    const versionMatches = branchVersion === u.to;
+                    if (versionMatches) {
+                        console.log(`${name}: branch already at target version; skipping bump.`);
+                        const existingPr = await (0, githubActions_1.findOpenPullRequestByHead)({ octo, owner, repo, head: branch });
+                        if (existingPr) {
+                            createdPRs.push({ name, url: existingPr.html_url });
+                        }
+                        (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
+                        continue;
+                    }
+                }
+                catch (readErr) {
+                    console.warn(`${name}: failed to read branch package for idempotence check: ${readErr instanceof Error ? readErr.message : String(readErr)}`);
+                }
             }
             else {
                 // Fresh branch from default branch.
@@ -33867,6 +33885,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.loadPackageDoc = loadPackageDoc;
 exports.findMelangePackages = findMelangePackages;
 exports.bumpWithMelangeTool = bumpWithMelangeTool;
 const fs_1 = __importDefault(__nccwpck_require__(9896));
@@ -33874,14 +33893,17 @@ const path_1 = __importDefault(__nccwpck_require__(6928));
 const glob_1 = __nccwpck_require__(1363);
 const js_yaml_1 = __importDefault(__nccwpck_require__(4281));
 const child_process_1 = __nccwpck_require__(5317);
+function loadPackageDoc(file) {
+    const raw = fs_1.default.readFileSync(file, 'utf8');
+    return js_yaml_1.default.load(raw);
+}
 function findMelangePackages(repoPath) {
     const pattern = path_1.default.join(repoPath, '**/*.yaml');
     const files = (0, glob_1.globSync)(pattern, { nodir: true, ignore: ['**/node_modules/**', '**/.git/**'] });
     const packages = {};
     for (const file of files) {
         try {
-            const raw = fs_1.default.readFileSync(file, 'utf8');
-            const doc = js_yaml_1.default.load(raw);
+            const doc = loadPackageDoc(file);
             if (doc && (doc.package || doc.Package) && doc.update) {
                 const name = doc.package?.name || doc.Package?.name || path_1.default.basename(file);
                 packages[name] = { file, doc };

@@ -8,7 +8,7 @@ import semver from 'semver';
 import { getLatestReleaseVersion } from './lib/releaseMonitor';
 import { getLatestGithubRelease } from './lib/githubReleases';
 import { getLatestGitTag } from './lib/gitTags';
-import { findMelangePackages, bumpWithMelangeTool } from './lib/melange';
+import { findMelangePackages, bumpWithMelangeTool, loadPackageDoc } from './lib/melange';
 import { getGitRepoFromPipeline, getGitBranchFromPipeline } from './lib/pipeline';
 import { resolveExpectedCommit } from './lib/commitResolver';
 import { applyTransforms, shouldIgnoreVersion } from './lib/transform';
@@ -285,6 +285,24 @@ async function main(): Promise<void> {
         // Reuse existing branch to avoid duplicate PRs; fetch latest state then checkout.
         run(`git fetch ${remoteUrl} ${branch}:${branch}`, { cwd: absRepoPath });
         run(`git checkout ${branch}`, { cwd: absRepoPath });
+
+        // If the branch already has the desired version, skip bump to avoid epoch churn.
+        try {
+          const pkgDoc = (loadPackageDoc(pkg.file) as any) || {};
+          const branchVersion = pkgDoc.package?.version || pkgDoc.Package?.version;
+          const versionMatches = branchVersion === u.to;
+          if (versionMatches) {
+            console.log(`${name}: branch already at target version; skipping bump.`);
+            const existingPr = await findOpenPullRequestByHead({ octo, owner, repo, head: branch });
+            if (existingPr) {
+              createdPRs.push({ name, url: existingPr.html_url });
+            }
+            run(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
+            continue;
+          }
+        } catch (readErr) {
+          console.warn(`${name}: failed to read branch package for idempotence check: ${readErr instanceof Error ? readErr.message : String(readErr)}`);
+        }
       } else {
         // Fresh branch from default branch.
         run(`git checkout -B ${branch} ${defaultBranch}`, { cwd: absRepoPath });
