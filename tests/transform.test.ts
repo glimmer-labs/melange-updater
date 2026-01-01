@@ -36,6 +36,11 @@ describe('transform', () => {
     expect(shouldIgnoreVersion({}, '6.0.0-nightly')).toBe(true);
   });
 
+  it('ignores using raw version when transformed loses prerelease markers', () => {
+    expect(shouldIgnoreVersion({}, '8.5.2', 'php-8.5.2RC1')).toBe(true);
+    expect(shouldIgnoreVersion({}, '8.5.2')).toBe(false);
+  });
+
   it('honors glob-like ignore patterns when regex is malformed', () => {
     const cfg: UpdateConfig = { ignore_regex_patterns: ['*-alpha'] };
     expect(shouldIgnoreVersion(cfg, '2.0.1-alpha')).toBe(true);

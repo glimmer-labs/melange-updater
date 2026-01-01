@@ -33173,7 +33173,7 @@ async function main() {
             }
             const transformed = (0, transform_1.applyTransforms)(updateCfg, latest);
             console.log(`${name}: latest raw=${latest} transformed=${transformed}`);
-            if ((0, transform_1.shouldIgnoreVersion)(updateCfg, transformed)) {
+            if ((0, transform_1.shouldIgnoreVersion)(updateCfg, transformed, latest)) {
                 console.log(`${name}: version ${transformed} ignored by ignore-regex-patterns`);
                 continue;
             }
@@ -34117,22 +34117,25 @@ function resolveIgnorePatterns(updateConfig) {
     const custom = Array.isArray(updateConfig?.ignore_regex_patterns) ? updateConfig.ignore_regex_patterns : [];
     return [...DEFAULT_IGNORE_REGEX_PATTERNS, ...custom];
 }
-function shouldIgnoreVersion(updateConfig, versionStr) {
+function shouldIgnoreVersion(updateConfig, versionStr, rawVersionStr) {
     const patterns = resolveIgnorePatterns(updateConfig);
+    const candidates = [versionStr, rawVersionStr].filter((v) => Boolean(v));
     for (const pat of patterns) {
-        try {
-            const re = new RegExp(pat, 'i');
-            if (re.test(versionStr))
-                return true;
-        }
-        catch (_) {
+        for (const candidate of candidates) {
             try {
-                const re = new RegExp(globToRegex(pat), 'i');
-                if (re.test(versionStr))
+                const re = new RegExp(pat, 'i');
+                if (re.test(candidate))
                     return true;
             }
             catch (_) {
-                // ignore malformed regex
+                try {
+                    const re = new RegExp(globToRegex(pat), 'i');
+                    if (re.test(candidate))
+                        return true;
+                }
+                catch (_) {
+                    // ignore malformed regex
+                }
             }
         }
     }

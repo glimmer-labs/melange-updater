@@ -81,18 +81,22 @@ function resolveIgnorePatterns(updateConfig: UpdateConfig | undefined): string[]
   return [...DEFAULT_IGNORE_REGEX_PATTERNS, ...custom];
 }
 
-export function shouldIgnoreVersion(updateConfig: UpdateConfig | undefined, versionStr: string): boolean {
+export function shouldIgnoreVersion(updateConfig: UpdateConfig | undefined, versionStr: string, rawVersionStr?: string): boolean {
   const patterns = resolveIgnorePatterns(updateConfig);
+  const candidates = [versionStr, rawVersionStr].filter((v): v is string => Boolean(v));
+
   for (const pat of patterns) {
-    try {
-      const re = new RegExp(pat, 'i');
-      if (re.test(versionStr)) return true;
-    } catch (_) {
+    for (const candidate of candidates) {
       try {
-        const re = new RegExp(globToRegex(pat), 'i');
-        if (re.test(versionStr)) return true;
+        const re = new RegExp(pat, 'i');
+        if (re.test(candidate)) return true;
       } catch (_) {
-        // ignore malformed regex
+        try {
+          const re = new RegExp(globToRegex(pat), 'i');
+          if (re.test(candidate)) return true;
+        } catch (_) {
+          // ignore malformed regex
+        }
       }
     }
   }

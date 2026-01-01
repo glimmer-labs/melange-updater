@@ -164,7 +164,7 @@ async function main(): Promise<void> {
       const transformed = applyTransforms(updateCfg, latest);
       console.log(`${name}: latest raw=${latest} transformed=${transformed}`);
 
-      if (shouldIgnoreVersion(updateCfg, transformed)) {
+      if (shouldIgnoreVersion(updateCfg, transformed, latest)) {
         console.log(`${name}: version ${transformed} ignored by ignore-regex-patterns`);
         continue;
       }
