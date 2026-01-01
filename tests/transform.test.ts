@@ -28,6 +28,14 @@ describe('transform', () => {
     expect(accepted).toBe(false);
   });
 
+  it('applies default ignore patterns when none are provided', () => {
+    expect(shouldIgnoreVersion(undefined, '2.0.1-alpha')).toBe(true);
+    expect(shouldIgnoreVersion({}, '3.0.0')).toBe(false);
+    expect(shouldIgnoreVersion({}, '4.1.0-rc1')).toBe(true);
+    expect(shouldIgnoreVersion({}, '5.0.0-beta2')).toBe(true);
+    expect(shouldIgnoreVersion({}, '6.0.0-nightly')).toBe(true);
+  });
+
   it('honors glob-like ignore patterns when regex is malformed', () => {
     const cfg: UpdateConfig = { ignore_regex_patterns: ['*-alpha'] };
     expect(shouldIgnoreVersion(cfg, '2.0.1-alpha')).toBe(true);

@@ -1,6 +1,19 @@
 import semver from 'semver';
 import { UpdateConfig } from '../types';
 
+const DEFAULT_IGNORE_REGEX_PATTERNS = [
+  '*alpha*',
+  '*rc*',
+  '*beta*',
+  '*pre*',
+  '*preview*',
+  '*dev*',
+  '*nightly*',
+  '*snapshot*',
+  '*eap*',
+  '*canary*',
+];
+
 function stripAffixes(cfg: { strip_prefix?: string; strip_suffix?: string } | undefined, v: string): string {
   let out = v;
   if (!cfg) return out;
@@ -63,15 +76,20 @@ export function applyTransforms(updateConfig: UpdateConfig | undefined, versionS
   return v;
 }
 
+function resolveIgnorePatterns(updateConfig: UpdateConfig | undefined): string[] {
+  const custom = Array.isArray(updateConfig?.ignore_regex_patterns) ? updateConfig.ignore_regex_patterns : [];
+  return [...DEFAULT_IGNORE_REGEX_PATTERNS, ...custom];
+}
+
 export function shouldIgnoreVersion(updateConfig: UpdateConfig | undefined, versionStr: string): boolean {
-  if (!updateConfig || !Array.isArray(updateConfig.ignore_regex_patterns)) return false;
-  for (const pat of updateConfig.ignore_regex_patterns) {
+  const patterns = resolveIgnorePatterns(updateConfig);
+  for (const pat of patterns) {
     try {
-      const re = new RegExp(pat);
+      const re = new RegExp(pat, 'i');
       if (re.test(versionStr)) return true;
     } catch (_) {
       try {
-        const re = new RegExp(globToRegex(pat));
+        const re = new RegExp(globToRegex(pat), 'i');
         if (re.test(versionStr)) return true;
       } catch (_) {
         // ignore malformed regex
