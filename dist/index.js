@@ -34041,6 +34041,18 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.applyTransforms = applyTransforms;
 exports.shouldIgnoreVersion = shouldIgnoreVersion;
 const semver_1 = __importDefault(__nccwpck_require__(2088));
+const DEFAULT_IGNORE_REGEX_PATTERNS = [
+    '*alpha*',
+    '*rc*',
+    '*beta*',
+    '*pre*',
+    '*preview*',
+    '*dev*',
+    '*nightly*',
+    '*snapshot*',
+    '*eap*',
+    '*canary*',
+];
 function stripAffixes(cfg, v) {
     let out = v;
     if (!cfg)
@@ -34101,18 +34113,21 @@ function applyTransforms(updateConfig, versionStr) {
     }
     return v;
 }
+function resolveIgnorePatterns(updateConfig) {
+    const custom = Array.isArray(updateConfig?.ignore_regex_patterns) ? updateConfig.ignore_regex_patterns : [];
+    return [...DEFAULT_IGNORE_REGEX_PATTERNS, ...custom];
+}
 function shouldIgnoreVersion(updateConfig, versionStr) {
-    if (!updateConfig || !Array.isArray(updateConfig.ignore_regex_patterns))
-        return false;
-    for (const pat of updateConfig.ignore_regex_patterns) {
+    const patterns = resolveIgnorePatterns(updateConfig);
+    for (const pat of patterns) {
         try {
-            const re = new RegExp(pat);
+            const re = new RegExp(pat, 'i');
             if (re.test(versionStr))
                 return true;
         }
         catch (_) {
             try {
-                const re = new RegExp(globToRegex(pat));
+                const re = new RegExp(globToRegex(pat), 'i');
                 if (re.test(versionStr))
                     return true;
             }
