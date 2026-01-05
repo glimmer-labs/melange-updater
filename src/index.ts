@@ -185,10 +185,16 @@ async function main(): Promise<void> {
       if (shouldUpdate) {
         console.log(`${name}: will update ${currentVersion} -> ${transformed}${isManual ? ' (manual)' : ''}`);
         let commitSha = '';
+        const tagCandidates: string[] = [];
+        if (tagForCommit && transformed && transformed !== tagForCommit && (latestSource === 'github' || latestSource === 'git')) {
+          tagCandidates.push(transformed);
+        }
+        if (tagForCommit) tagCandidates.push(tagForCommit);
         if (!isManual) {
           commitSha = await resolveExpectedCommit({
             source: latestSource,
             tag: tagForCommit,
+            tagCandidates,
             repoUrl: repoUrlForCommit,
             branch: branchForCommit,
             owner: githubOwner,

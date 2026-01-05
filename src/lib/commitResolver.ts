@@ -27,6 +27,7 @@ export function resolveTagCommit(repoUrl: string, tag: string): string {
 interface ResolveExpectedCommitArgs {
   source: string;
   tag?: string;
+  tagCandidates?: string[];
   repoUrl?: string;
   branch?: string;
   owner?: string;
@@ -42,41 +43,57 @@ interface ResolveExpectedCommitArgs {
   packageName: string;
 }
 
-export async function resolveExpectedCommit({ source, tag, repoUrl, branch, owner, repo, octo, packageName }: ResolveExpectedCommitArgs): Promise<string> {
+export async function resolveExpectedCommit({ source, tag, tagCandidates = [], repoUrl, branch, owner, repo, octo, packageName }: ResolveExpectedCommitArgs): Promise<string> {
+  const tagsToTry: string[] = Array.from(
+    new Set([...(tagCandidates || []), tag].filter((t): t is string => Boolean(t)))
+  );
+  const primaryTag = tag || tagsToTry[0] || '';
   let commitSha = '';
 
-  if (source === 'github' && tag && owner && repo) {
-    try {
-      const ref = await octo.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
-      commitSha = ref?.data?.object?.sha || '';
-    } catch (err) {
-      // Fallback: try release by tag to grab target_commitish, then resolve.
-      if (octo.rest.repos?.getReleaseByTag) {
-        try {
-          const rel = await octo.rest.repos.getReleaseByTag({ owner, repo, tag });
-          const target = rel?.data?.target_commitish || '';
-          if (target) {
-            // target_commitish can be a sha or a branch name; try as ref first.
-            const ref = await octo.rest.git.getRef({ owner, repo, ref: `heads/${target}` });
-            commitSha = ref?.data?.object?.sha || target;
-          }
-        } catch (_) {
-          // ignore and fallback below
-        }
-      }
+  if (source === 'github' && tagsToTry.length && owner && repo) {
+    let lastError: unknown;
 
-      if (!commitSha) {
-        const fallbackRepo = `https://github.com/${owner}/${repo}.git`;
-        commitSha = resolveTagCommit(fallbackRepo, tag);
-      }
-
-      if (!commitSha) {
-        const message = err instanceof Error ? err.message : String(err);
-        core.warning(`${packageName}: failed to resolve commit for GitHub tag ${tag}: ${message}`);
+    for (const tagName of tagsToTry) {
+      try {
+        const ref = await octo.rest.git.getRef({ owner, repo, ref: `tags/${tagName}` });
+        commitSha = ref?.data?.object?.sha || '';
+        if (commitSha) return commitSha;
+      } catch (err) {
+        lastError = err;
       }
     }
-  } else if (source === 'git' && repoUrl && tag) {
-    commitSha = resolveTagCommit(repoUrl, tag);
+
+    // Fallback: try release by the primary tag to grab target_commitish, then resolve.
+    if (primaryTag && octo.rest.repos?.getReleaseByTag) {
+      try {
+        const rel = await octo.rest.repos.getReleaseByTag({ owner, repo, tag: primaryTag });
+        const target = rel?.data?.target_commitish || '';
+        if (target) {
+          const ref = await octo.rest.git.getRef({ owner, repo, ref: `heads/${target}` });
+          commitSha = ref?.data?.object?.sha || target;
+          if (commitSha) return commitSha;
+        }
+      } catch (_) {
+        // ignore and fallback below
+      }
+    }
+
+    const fallbackRepo = `https://github.com/${owner}/${repo}.git`;
+    for (const tagName of tagsToTry) {
+      commitSha = resolveTagCommit(fallbackRepo, tagName);
+      if (commitSha) return commitSha;
+    }
+
+    if (!commitSha && lastError) {
+      const message = lastError instanceof Error ? lastError.message : String(lastError);
+      const attempted = tagsToTry.join(', ');
+      core.warning(`${packageName}: failed to resolve commit for GitHub tags [${attempted}]: ${message}`);
+    }
+  } else if (source === 'git' && repoUrl && tagsToTry.length) {
+    for (const tagName of tagsToTry) {
+      commitSha = resolveTagCommit(repoUrl, tagName);
+      if (commitSha) return commitSha;
+    }
   } else if (source === 'release-monitor' && repoUrl && branch) {
     commitSha = resolveBranchHead(repoUrl, branch);
   }

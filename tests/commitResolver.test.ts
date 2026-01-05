@@ -71,6 +71,67 @@ describe('commitResolver', () => {
     expect(sha).toBe('cafebabe');
   });
 
+  it('prefers candidate tag when resolving GitHub tag commit', async () => {
+    const { resolveExpectedCommit } = await import('../src/lib/commitResolver');
+    const getRef = vi.fn(({ ref }: { ref: string }) => {
+      if (ref === 'tags/v1') return Promise.resolve({ data: { object: { sha: 'v1sha' } } });
+      if (ref === 'tags/release/v1') return Promise.resolve({ data: { object: { sha: 'releaseSha' } } });
+      return Promise.reject(new Error('not found'));
+    });
+
+    const octo = {
+      rest: {
+        git: { getRef },
+        repos: { getReleaseByTag: vi.fn() },
+      },
+    } as any;
+
+    const sha = await resolveExpectedCommit({
+      source: 'github',
+      tag: 'release/v1',
+      tagCandidates: ['v1'],
+      owner: 'owner',
+      repo: 'repo',
+      packageName: 'pkg',
+      octo,
+    });
+
+    expect(sha).toBe('v1sha');
+    expect(getRef).toHaveBeenCalledTimes(1);
+    expect(getRef).toHaveBeenNthCalledWith(1, { owner: 'owner', repo: 'repo', ref: 'tags/v1' });
+  });
+
+  it('falls back to raw tag when stripped candidate misses', async () => {
+    const { resolveExpectedCommit } = await import('../src/lib/commitResolver');
+    const getRef = vi.fn(({ ref }: { ref: string }) => {
+      if (ref === 'tags/1.2.3') return Promise.reject(new Error('not found'));
+      if (ref === 'tags/v1.2.3') return Promise.resolve({ data: { object: { sha: 'vsha' } } });
+      return Promise.reject(new Error('unexpected ref'));
+    });
+
+    const octo = {
+      rest: {
+        git: { getRef },
+        repos: { getReleaseByTag: vi.fn() },
+      },
+    } as any;
+
+    const sha = await resolveExpectedCommit({
+      source: 'github',
+      tag: 'v1.2.3',
+      tagCandidates: ['1.2.3'],
+      owner: 'owner',
+      repo: 'repo',
+      packageName: 'pkg',
+      octo,
+    });
+
+    expect(sha).toBe('vsha');
+    expect(getRef).toHaveBeenCalledTimes(2);
+    expect(getRef).toHaveBeenNthCalledWith(1, { owner: 'owner', repo: 'repo', ref: 'tags/1.2.3' });
+    expect(getRef).toHaveBeenNthCalledWith(2, { owner: 'owner', repo: 'repo', ref: 'tags/v1.2.3' });
+  });
+
   it('falls back to release target_commitish when tag ref is missing', async () => {
     execSyncMock.mockImplementationOnce(() => '') // ls-remote fallback unused here
       .mockImplementation(() => '');
