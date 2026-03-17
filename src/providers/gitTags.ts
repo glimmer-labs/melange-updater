@@ -37,7 +37,7 @@ function pickLatestTag(tags: string[], opts: TagOptions = {}): string {
     semverCandidates.sort((a, b) => semver.rcompare(a.v, b.v));
     return semverCandidates[0].tag;
   }
-  return filtered[0];
+  return [...filtered].sort((a, b) => b.localeCompare(a))[0];
 }
 
 export function getLatestGitTag(repoUrl: string, opts: TagOptions = {}): string {

@@ -1,6 +1,9 @@
 import * as core from '@actions/core';
 import { Octokit } from '@octokit/rest';
-import { redactSecrets } from './actionUtils';
+import { redactSecrets } from '../core/actionUtils';
+import { createLogger } from '../core/logger';
+
+const logger = createLogger('githubActions');
 
 interface CreateIssueParams {
   octo: Octokit;
@@ -14,7 +17,7 @@ interface CreateIssueParams {
 export async function createIssueForPackage({ octo, targetRepo, token, pkgName, message, phase }: CreateIssueParams): Promise<unknown> {
   const safeMessage = redactSecrets(message);
   if (!token) {
-    console.warn(`Cannot create issue for ${pkgName} (${phase}): no token available.`);
+    logger.warn(`Cannot create issue for ${pkgName} (${phase}): no token available.`);
     return null;
   }
   try {
@@ -24,16 +27,16 @@ export async function createIssueForPackage({ octo, targetRepo, token, pkgName, 
     const existing = await octo.rest.issues.listForRepo({ owner, repo, state: 'open', per_page: 50 });
     const dup = existing.data.find((i) => i.title === title);
     if (dup) {
-      console.log(`Issue already exists for ${pkgName}: ${dup.html_url}`);
+      logger.info(`Issue already exists for ${pkgName}: ${dup.html_url}`);
       return dup;
     }
     const body = `melange updater encountered an error ${phase ? `during ${phase} ` : ''}for package **${pkgName}**.\n\nError: ${safeMessage}`;
     const { data: issue } = await octo.rest.issues.create({ owner, repo, title, body });
-    console.log(`Created issue for ${pkgName}: ${title}`);
+    logger.info(`Created issue for ${pkgName}: ${title}`);
     return issue;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.warn(`Failed to create issue for ${pkgName}: ${msg}`);
+    logger.warn(`Failed to create issue for ${pkgName}: ${msg}`);
     try {
       core.warning(msg);
     } catch (_) {}
@@ -61,14 +64,14 @@ interface FindPullRequestParams {
 
 export async function createPullRequestWithLabels({ octo, owner, repo, title, head, base, body, labels = [] }: CreatePullRequestParams) {
   const { data: pr } = await octo.rest.pulls.create({ owner, repo, title, head, base, body });
-  console.log('Created PR:', pr.html_url);
+  logger.info('Created PR:', pr.html_url);
   if (labels.length > 0) {
     try {
       await octo.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels });
-      console.log(`Added labels to PR ${pr.number}: ${labels.join(', ')}`);
+      logger.info(`Added labels to PR ${pr.number}: ${labels.join(', ')}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.warn(`Failed adding labels for PR ${pr.number}: ${msg}`);
+      logger.warn(`Failed adding labels for PR ${pr.number}: ${msg}`);
       try {
         core.warning(msg);
       } catch (_) {}

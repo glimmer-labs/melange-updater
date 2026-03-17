@@ -4,8 +4,8 @@ import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
 import yaml from 'js-yaml';
-import { bumpWithMelangeTool } from '../src/lib/melange';
-import { ensureDockerAvailable } from '../src/lib/actionUtils';
+import { bumpWithMelangeTool } from '../src/integrations/melange';
+import { ensureDockerAvailable } from '../src/core/actionUtils';
 
 const hasDocker = ensureDockerAvailable() === '';
 

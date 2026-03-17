@@ -15,7 +15,7 @@ describe('commitResolver', () => {
   });
 
   it('resolves commit for github source via octokit', async () => {
-    const { resolveExpectedCommit } = await import('../src/lib/commitResolver');
+    const { resolveExpectedCommit } = await import('../src/providers/commitResolver');
     const octo = {
       rest: {
         git: {
@@ -40,7 +40,7 @@ describe('commitResolver', () => {
   });
 
   it('resolves commit for git source using ls-remote tag', async () => {
-    const { resolveExpectedCommit } = await import('../src/lib/commitResolver');
+    const { resolveExpectedCommit } = await import('../src/providers/commitResolver');
     const octo = { rest: { git: { getRef: vi.fn() } } } as any;
 
     const sha = await resolveExpectedCommit({
@@ -56,7 +56,7 @@ describe('commitResolver', () => {
   });
 
   it('resolves branch head for release-monitor source', async () => {
-    const { resolveExpectedCommit } = await import('../src/lib/commitResolver');
+    const { resolveExpectedCommit } = await import('../src/providers/commitResolver');
     const octo = { rest: { git: { getRef: vi.fn() } } } as any;
 
     const sha = await resolveExpectedCommit({
@@ -72,7 +72,7 @@ describe('commitResolver', () => {
   });
 
   it('prefers candidate tag when resolving GitHub tag commit', async () => {
-    const { resolveExpectedCommit } = await import('../src/lib/commitResolver');
+    const { resolveExpectedCommit } = await import('../src/providers/commitResolver');
     const getRef = vi.fn(({ ref }: { ref: string }) => {
       if (ref === 'tags/v1') return Promise.resolve({ data: { object: { sha: 'v1sha' } } });
       if (ref === 'tags/release/v1') return Promise.resolve({ data: { object: { sha: 'releaseSha' } } });
@@ -102,7 +102,7 @@ describe('commitResolver', () => {
   });
 
   it('falls back to raw tag when stripped candidate misses', async () => {
-    const { resolveExpectedCommit } = await import('../src/lib/commitResolver');
+    const { resolveExpectedCommit } = await import('../src/providers/commitResolver');
     const getRef = vi.fn(({ ref }: { ref: string }) => {
       if (ref === 'tags/1.2.3') return Promise.reject(new Error('not found'));
       if (ref === 'tags/v1.2.3') return Promise.resolve({ data: { object: { sha: 'vsha' } } });
@@ -136,7 +136,7 @@ describe('commitResolver', () => {
     execSyncMock.mockImplementationOnce(() => '') // ls-remote fallback unused here
       .mockImplementation(() => '');
 
-    const { resolveExpectedCommit } = await import('../src/lib/commitResolver');
+    const { resolveExpectedCommit } = await import('../src/providers/commitResolver');
     const octo = {
       rest: {
         git: {

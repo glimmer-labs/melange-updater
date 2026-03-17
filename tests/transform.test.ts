@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyTransforms, shouldIgnoreVersion } from '../src/lib/transform';
+import { applyTransforms, shouldIgnoreVersion } from '../src/discovery/transform';
 import { UpdateConfig } from '../src/types';
 
 describe('transform', () => {

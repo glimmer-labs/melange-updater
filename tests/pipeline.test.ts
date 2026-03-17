@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getGitRepoFromPipeline, getGitBranchFromPipeline } from '../src/lib/pipeline';
+import { getGitRepoFromPipeline, getGitBranchFromPipeline } from '../src/discovery/pipeline';
 
 const samplePipeline = [
   { uses: 'setup' },

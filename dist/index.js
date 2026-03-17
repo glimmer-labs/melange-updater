@@ -32985,432 +32985,7 @@ module.exports = {
 
 /***/ }),
 
-/***/ 9407:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-const path_1 = __importDefault(__nccwpck_require__(6928));
-const minimist_1 = __importDefault(__nccwpck_require__(994));
-const core = __importStar(__nccwpck_require__(7484));
-const rest_1 = __nccwpck_require__(9380);
-const semver_1 = __importDefault(__nccwpck_require__(2088));
-const releaseMonitor_1 = __nccwpck_require__(6242);
-const githubReleases_1 = __nccwpck_require__(1898);
-const gitTags_1 = __nccwpck_require__(7082);
-const melange_1 = __nccwpck_require__(9810);
-const pipeline_1 = __nccwpck_require__(6181);
-const commitResolver_1 = __nccwpck_require__(8320);
-const transform_1 = __nccwpck_require__(8315);
-const actionUtils_1 = __nccwpck_require__(7740);
-const githubActions_1 = __nccwpck_require__(833);
-const updateConfig_1 = __nccwpck_require__(1336);
-function parseBooleanFlag(value) {
-    return value === true || value === 'true';
-}
-function getInputValue(name, fallback = '') {
-    try {
-        const val = core.getInput(name, { trimWhitespace: true });
-        if (val)
-            return val;
-    }
-    catch (_) {
-        // ignore if core not available or input missing
-    }
-    const envKey = `INPUT_${name.replace(/-/g, '_').toUpperCase()}`;
-    return process.env[envKey] || fallback;
-}
-async function main() {
-    const argv = (0, minimist_1.default)(process.argv.slice(2));
-    const targetRepo = argv['target-repo'] || argv['repository'] || getInputValue('repository');
-    const token = argv['token'] || getInputValue('token') || process.env.GITHUB_TOKEN;
-    const dryRun = parseBooleanFlag(argv['dry-run']) ||
-        parseBooleanFlag(getInputValue('dry_run')) ||
-        parseBooleanFlag(getInputValue('dry-run'));
-    const preview = parseBooleanFlag(argv['preview']) ||
-        parseBooleanFlag(argv['no-commit']) ||
-        parseBooleanFlag(getInputValue('preview')) ||
-        parseBooleanFlag(getInputValue('no_commit')) ||
-        parseBooleanFlag(getInputValue('no-commit'));
-    const releaseMonitorToken = argv['release-monitor-token'] || process.env.RELEASE_MONITOR_TOKEN || getInputValue('release_monitor_token') || '';
-    const gitAuthorName = argv['git-author-name'] || getInputValue('git_author_name') || 'melange-updater';
-    const gitAuthorEmail = argv['git-author-email'] || getInputValue('git_author_email') || 'noreply@example.com';
-    const repoPath = argv['repo-path'] || getInputValue('repo_path') || process.env.GITHUB_WORKSPACE || '.';
-    const githubLabels = (argv['github-labels'] || argv['github_labels'] || getInputValue('github_labels') || getInputValue('github-labels') || '')
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-    if (!targetRepo) {
-        (0, actionUtils_1.failAndExit)('No target repo specified. Use --target-repo owner/repo');
-    }
-    if (!/^[^\s/]+\/[^\s/]+$/.test(targetRepo)) {
-        (0, actionUtils_1.failAndExit)('Invalid target repo format. Expected owner/repo');
-    }
-    if (!token && !dryRun && !preview) {
-        (0, actionUtils_1.failAndExit)('No token provided. Use --token or set GITHUB_TOKEN (or run with --dry-run/--preview/--no-commit)');
-    }
-    const absRepoPath = path_1.default.resolve(process.cwd(), repoPath);
-    console.log('Repository path:', absRepoPath);
-    const dockerError = (0, actionUtils_1.ensureDockerAvailable)();
-    if (dockerError) {
-        (0, actionUtils_1.failAndExit)(dockerError);
-    }
-    const packages = (0, melange_1.findMelangePackages)(absRepoPath);
-    console.log('Found', Object.keys(packages).length, 'candidate melange packages');
-    const updates = {};
-    const octo = new rest_1.Octokit({ auth: token });
-    const createdPRs = [];
-    const failedPackages = [];
-    const packageErrors = [];
-    const issueTracker = new Set();
-    for (const [name, pkg] of Object.entries(packages)) {
-        try {
-            const updateCfgRaw = pkg.doc.update || {};
-            const updateCfg = (0, updateConfig_1.normalizeKeys)(updateCfgRaw);
-            if (updateCfg.enabled === false) {
-                console.log(`${name}: update.enabled is false — skipping`);
-                continue;
-            }
-            const isManual = updateCfg.manual === true;
-            let latest = '';
-            let latestSource = '';
-            let tagForCommit = '';
-            let repoUrlForCommit = '';
-            let branchForCommit = '';
-            let githubOwner = '';
-            let githubRepoName = '';
-            if (updateCfg.release_monitor?.identifier) {
-                const id = updateCfg.release_monitor.identifier;
-                console.log(`${name}: querying release-monitor id ${id}`);
-                latest = await (0, releaseMonitor_1.getLatestReleaseVersion)(id, {
-                    token: releaseMonitorToken,
-                    version_filter_prefix: updateCfg.release_monitor.version_filter_prefix,
-                    version_filter_contains: updateCfg.release_monitor.version_filter_contains,
-                });
-                latestSource = 'release-monitor';
-                repoUrlForCommit = updateCfg.git?.repository || (0, pipeline_1.getGitRepoFromPipeline)(pkg.doc);
-                branchForCommit = updateCfg.git?.branch || (0, pipeline_1.getGitBranchFromPipeline)(pkg.doc);
-            }
-            if (!latest && updateCfg.github?.identifier) {
-                const [owner, repo] = (updateCfg.github.identifier || '').split('/');
-                if (owner && repo) {
-                    console.log(`${name}: querying GitHub releases ${owner}/${repo}`);
-                    latest = await (0, githubReleases_1.getLatestGithubRelease)(owner, repo, octo, {
-                        useTag: !!updateCfg.github.use_tag,
-                        tag_filter_prefix: updateCfg.github.tag_filter_prefix,
-                        tag_filter_contains: updateCfg.github.tag_filter_contains || updateCfg.github.tag_filter,
-                    });
-                    if (latest) {
-                        latestSource = 'github';
-                        tagForCommit = latest;
-                        githubOwner = owner;
-                        githubRepoName = repo;
-                    }
-                }
-            }
-            if (!latest && updateCfg.git) {
-                const repoUrl = updateCfg.git.repository || (0, pipeline_1.getGitRepoFromPipeline)(pkg.doc);
-                if (repoUrl) {
-                    console.log(`${name}: querying git tags from ${repoUrl}`);
-                    try {
-                        latest = (0, gitTags_1.getLatestGitTag)(repoUrl, {
-                            tag_filter_prefix: updateCfg.git.tag_filter_prefix,
-                            tag_filter_contains: updateCfg.git.tag_filter_contains,
-                        });
-                        if (latest) {
-                            latestSource = 'git';
-                            repoUrlForCommit = repoUrl;
-                            tagForCommit = latest;
-                            branchForCommit = updateCfg.git.branch || (0, pipeline_1.getGitBranchFromPipeline)(pkg.doc) || '';
-                        }
-                    }
-                    catch (e) {
-                        const msg = e instanceof Error ? e.message : String(e);
-                        console.warn(`${name}: failed to query git tags: ${msg}`);
-                    }
-                }
-            }
-            if (!latest) {
-                console.log(`${name}: no candidate latest version found`);
-                continue;
-            }
-            const transformed = (0, transform_1.applyTransforms)(updateCfg, latest);
-            console.log(`${name}: latest raw=${latest} transformed=${transformed}`);
-            if ((0, transform_1.shouldIgnoreVersion)(updateCfg, transformed, latest)) {
-                console.log(`${name}: version ${transformed} ignored by ignore-regex-patterns`);
-                continue;
-            }
-            const currentVersion = pkg.doc.package?.version || pkg.doc.Package?.version || '';
-            if (!currentVersion) {
-                console.log(`${name}: no current version in package metadata`);
-            }
-            let shouldUpdate = false;
-            if (semver_1.default.valid(transformed) && semver_1.default.valid(currentVersion)) {
-                shouldUpdate = semver_1.default.gt(transformed, currentVersion);
-            }
-            else if (transformed !== currentVersion) {
-                shouldUpdate = true;
-            }
-            if (shouldUpdate) {
-                console.log(`${name}: will update ${currentVersion} -> ${transformed}${isManual ? ' (manual)' : ''}`);
-                let commitSha = '';
-                const tagCandidates = [];
-                if (tagForCommit && transformed && transformed !== tagForCommit && (latestSource === 'github' || latestSource === 'git')) {
-                    tagCandidates.push(transformed);
-                }
-                if (tagForCommit)
-                    tagCandidates.push(tagForCommit);
-                if (!isManual) {
-                    commitSha = await (0, commitResolver_1.resolveExpectedCommit)({
-                        source: latestSource,
-                        tag: tagForCommit,
-                        tagCandidates,
-                        repoUrl: repoUrlForCommit,
-                        branch: branchForCommit,
-                        owner: githubOwner,
-                        repo: githubRepoName,
-                        octo,
-                        packageName: name,
-                    });
-                }
-                updates[name] = { from: currentVersion, to: transformed, file: pkg.file, manual: isManual, commit: commitSha };
-            }
-        }
-        catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            const safeMsg = (0, actionUtils_1.redactSecrets)(msg);
-            console.warn(`failed to process package ${name}: ${safeMsg}`);
-            packageErrors.push({ name, phase: 'version discovery', message: safeMsg });
-            if (!dryRun && !preview) {
-                const issueKey = `${name}|version discovery`;
-                if (!issueTracker.has(issueKey)) {
-                    await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'version discovery' });
-                    issueTracker.add(issueKey);
-                }
-            }
-        }
-    }
-    const updatesCount = Object.keys(updates).length;
-    const updateEntries = Object.entries(updates);
-    const manualUpdates = updateEntries.filter(([, u]) => u.manual);
-    const nonManualUpdates = updateEntries.filter(([, u]) => !u.manual);
-    if (updatesCount === 0) {
-        console.log('No updates detected. Exiting without creating a branch.');
-        if (dryRun)
-            console.log('Dry run mode: nothing was changed.');
-        await (0, actionUtils_1.writeSummary)({ mode: 'no-updates', updates, packageErrors });
-        return;
-    }
-    if (dryRun) {
-        console.log('Dry run enabled — the following updates would be applied:');
-        console.log(JSON.stringify(updates, null, 2));
-        await (0, actionUtils_1.writeSummary)({ mode: 'dry-run', updates, manualUpdates, packageErrors });
-        return;
-    }
-    if (preview) {
-        for (const [name, u] of Object.entries(updates)) {
-            if (u.manual)
-                continue;
-            const pkg = packages[name];
-            if (!pkg)
-                continue;
-            (0, melange_1.bumpWithMelangeTool)({ repoPath: absRepoPath, packageFile: pkg.file, version: u.to, expectedCommit: u.commit });
-        }
-        console.log('Preview mode: updates applied locally; no branch/commit/push/PR.');
-        await (0, actionUtils_1.writeSummary)({ mode: 'preview', updates, manualUpdates, packageErrors });
-        return;
-    }
-    if (nonManualUpdates.length === 0) {
-        console.log('Only manual updates detected; nothing to auto-apply.');
-        await (0, actionUtils_1.writeSummary)({ mode: 'manual-only', updates, manualUpdates, packageErrors });
-        return;
-    }
-    const [owner, repo] = targetRepo.split('/');
-    const { data: repoData } = await octo.rest.repos.get({ owner, repo });
-    const defaultBranch = repoData.default_branch || 'main';
-    const startingBranch = (0, actionUtils_1.execGetOutput)('git rev-parse --abbrev-ref HEAD', absRepoPath).trim() || defaultBranch;
-    const remoteUrl = `https://x-access-token:${token}@github.com/${targetRepo}.git`;
-    const dirtyReason = (0, actionUtils_1.ensureCleanWorkingTree)(absRepoPath, actionUtils_1.execGetOutput);
-    if (dirtyReason) {
-        (0, actionUtils_1.failAndExit)(dirtyReason);
-    }
-    (0, actionUtils_1.run)(`git config user.name "${(0, actionUtils_1.escapeShell)(gitAuthorName)}"`, { cwd: absRepoPath });
-    (0, actionUtils_1.run)(`git config user.email "${(0, actionUtils_1.escapeShell)(gitAuthorEmail)}"`, { cwd: absRepoPath });
-    for (const [name, u] of nonManualUpdates) {
-        try {
-            (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
-            const pkg = packages[name];
-            if (!pkg) {
-                console.warn(`Package metadata for ${name} not found; skipping.`);
-                continue;
-            }
-            const safeName = (0, actionUtils_1.sanitizeName)(name);
-            const branch = `melange-update-${safeName}`;
-            const remoteHead = (0, actionUtils_1.execGetOutput)(`git ls-remote ${remoteUrl} refs/heads/${branch}`, absRepoPath).trim();
-            const branchExistsRemote = !!remoteHead;
-            if (branchExistsRemote) {
-                // Reuse existing branch to avoid duplicate PRs; fetch latest state then checkout.
-                (0, actionUtils_1.run)(`git fetch ${remoteUrl} ${branch}:${branch}`, { cwd: absRepoPath });
-                (0, actionUtils_1.run)(`git checkout ${branch}`, { cwd: absRepoPath });
-                // If the branch already has the desired version, skip bump to avoid epoch churn.
-                try {
-                    const pkgDoc = (0, melange_1.loadPackageDoc)(pkg.file) || {};
-                    const branchVersion = pkgDoc.package?.version || pkgDoc.Package?.version;
-                    const versionMatches = branchVersion === u.to;
-                    if (versionMatches) {
-                        console.log(`${name}: branch already at target version; skipping bump.`);
-                        const existingPr = await (0, githubActions_1.findOpenPullRequestByHead)({ octo, owner, repo, head: branch });
-                        if (existingPr) {
-                            createdPRs.push({ name, url: existingPr.html_url });
-                        }
-                        (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
-                        continue;
-                    }
-                }
-                catch (readErr) {
-                    console.warn(`${name}: failed to read branch package for idempotence check: ${readErr instanceof Error ? readErr.message : String(readErr)}`);
-                }
-            }
-            else {
-                // Fresh branch from default branch.
-                (0, actionUtils_1.run)(`git checkout -B ${branch} ${defaultBranch}`, { cwd: absRepoPath });
-            }
-            try {
-                (0, melange_1.bumpWithMelangeTool)({ repoPath: absRepoPath, packageFile: pkg.file, version: u.to, expectedCommit: u.commit });
-            }
-            catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                const safeMsg = (0, actionUtils_1.redactSecrets)(msg);
-                console.warn(`${name}: melange bump failed: ${safeMsg}`);
-                failedPackages.push(name);
-                packageErrors.push({ name, phase: 'melange bump', message: safeMsg });
-                const issueKey = `${name}|melange bump`;
-                if (!issueTracker.has(issueKey)) {
-                    await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'melange bump' });
-                    issueTracker.add(issueKey);
-                }
-                (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
-                continue;
-            }
-            (0, actionUtils_1.run)('git add -A', { cwd: absRepoPath });
-            const status = (0, actionUtils_1.execGetOutput)('git status --porcelain', absRepoPath).trim();
-            if (!status) {
-                console.log(`${name}: no changes to commit after applying update; skipping push/PR.`);
-                (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
-                continue;
-            }
-            (0, actionUtils_1.run)(`git commit -m "chore(update): automatic update for ${(0, actionUtils_1.escapeShell)(name)}"`, { cwd: absRepoPath });
-            try {
-                (0, actionUtils_1.run)(`git push ${remoteUrl} ${branch}`, { cwd: absRepoPath });
-            }
-            catch (pushErr) {
-                const msg = pushErr instanceof Error ? pushErr.message : String(pushErr);
-                const safeMsg = (0, actionUtils_1.redactSecrets)(msg);
-                console.warn(`Failed to push branch for ${name}: ${safeMsg}`);
-                failedPackages.push(name);
-                packageErrors.push({ name, phase: 'git push', message: safeMsg });
-                const issueKey = `${name}|git push`;
-                if (!issueTracker.has(issueKey)) {
-                    await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'git push' });
-                    issueTracker.add(issueKey);
-                }
-                (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
-                continue;
-            }
-            const existingPr = await (0, githubActions_1.findOpenPullRequestByHead)({ octo, owner, repo, head: branch });
-            if (existingPr) {
-                console.log(`${name}: updated existing PR ${existingPr.html_url}`);
-                createdPRs.push({ name, url: existingPr.html_url });
-            }
-            else {
-                const prTitle = `Automated update for ${name}`;
-                const prBody = `This PR updates ${name}: ${u.from} -> ${u.to}${githubLabels.length ? `\n\nLabels: ${githubLabels.join(', ')}` : ''}`;
-                const pr = await (0, githubActions_1.createPullRequestWithLabels)({ octo, owner, repo, title: prTitle, head: branch, base: defaultBranch, body: prBody, labels: githubLabels });
-                createdPRs.push({ name, url: pr.html_url });
-            }
-            (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
-        }
-        catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            const safeMsg = (0, actionUtils_1.redactSecrets)(msg);
-            console.warn(`Failed to create PR for ${name}: ${safeMsg}`);
-            packageErrors.push({ name, phase: 'PR creation', message: safeMsg });
-            const issueKey = `${name}|PR creation`;
-            if (!issueTracker.has(issueKey)) {
-                await (0, githubActions_1.createIssueForPackage)({ octo, targetRepo, token, pkgName: name, message: safeMsg, phase: 'PR creation' });
-                issueTracker.add(issueKey);
-            }
-            try {
-                (0, actionUtils_1.run)(`git checkout ${defaultBranch}`, { cwd: absRepoPath });
-            }
-            catch (_) { }
-            failedPackages.push(name);
-        }
-    }
-    (0, actionUtils_1.run)(`git checkout ${startingBranch}`, { cwd: absRepoPath });
-    if (manualUpdates.length > 0) {
-        console.log('Manual updates were detected and not auto-applied:', manualUpdates.map(([n, u]) => `${n} (${u.from} -> ${u.to})`).join(', '));
-    }
-    console.log(`PRs created: ${createdPRs.length}`);
-    createdPRs.forEach((p) => console.log(`- ${p.name}: ${p.url}`));
-    if (failedPackages.length) {
-        console.log(`Packages that failed to push/PR: ${failedPackages.join(', ')}`);
-    }
-    console.log('Done.');
-    await (0, actionUtils_1.writeSummary)({ mode: 'pr', updates, createdPRs, manualUpdates, failedPackages, packageErrors });
-}
-main().catch((err) => {
-    console.error(err);
-    try {
-        core.setFailed(err.message || String(err));
-    }
-    catch (_) {
-        // ignore if core is unavailable
-    }
-    process.exit(1);
-});
-
-
-/***/ }),
-
-/***/ 7740:
+/***/ 2392:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -33568,7 +33143,740 @@ function ensureCleanWorkingTree(cwd, execGetOutputFn) {
 
 /***/ }),
 
-/***/ 8320:
+/***/ 9114:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.parseBooleanFlag = parseBooleanFlag;
+exports.collectRuntimeInputs = collectRuntimeInputs;
+exports.validateRuntimeInputs = validateRuntimeInputs;
+const core = __importStar(__nccwpck_require__(7484));
+function parseBooleanFlag(value) {
+    return value === true || value === 'true';
+}
+function readString(value) {
+    return typeof value === 'string' ? value : '';
+}
+function getInputValue(name, env, fallback = '') {
+    try {
+        const val = core.getInput(name, { trimWhitespace: true });
+        if (val)
+            return val;
+    }
+    catch (_) {
+        // Ignore when running outside GitHub Actions.
+    }
+    const envKey = `INPUT_${name.replace(/-/g, '_').toUpperCase()}`;
+    return env[envKey] || fallback;
+}
+function collectRuntimeInputs(argv, env = process.env) {
+    const targetRepo = readString(argv['target-repo']) || readString(argv['repository']) || getInputValue('repository', env);
+    const token = readString(argv['token']) || getInputValue('token', env) || env.GITHUB_TOKEN || '';
+    const dryRun = parseBooleanFlag(argv['dry-run']) ||
+        parseBooleanFlag(getInputValue('dry_run', env)) ||
+        parseBooleanFlag(getInputValue('dry-run', env));
+    const preview = parseBooleanFlag(argv['preview']) ||
+        parseBooleanFlag(argv['no-commit']) ||
+        parseBooleanFlag(getInputValue('preview', env)) ||
+        parseBooleanFlag(getInputValue('no_commit', env)) ||
+        parseBooleanFlag(getInputValue('no-commit', env));
+    const releaseMonitorToken = readString(argv['release-monitor-token']) || env.RELEASE_MONITOR_TOKEN || getInputValue('release_monitor_token', env) || '';
+    const gitAuthorName = readString(argv['git-author-name']) || getInputValue('git_author_name', env) || 'melange-updater';
+    const gitAuthorEmail = readString(argv['git-author-email']) || getInputValue('git_author_email', env) || 'noreply@example.com';
+    const repoPath = readString(argv['repo-path']) || getInputValue('repo_path', env) || env.GITHUB_WORKSPACE || '.';
+    const githubLabels = (readString(argv['github-labels']) ||
+        readString(argv['github_labels']) ||
+        getInputValue('github_labels', env) ||
+        getInputValue('github-labels', env) ||
+        '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    return {
+        targetRepo,
+        token,
+        dryRun,
+        preview,
+        releaseMonitorToken,
+        gitAuthorName,
+        gitAuthorEmail,
+        repoPath,
+        githubLabels,
+    };
+}
+function validateRuntimeInputs(inputs) {
+    if (!inputs.targetRepo) {
+        return 'No target repo specified. Use --target-repo owner/repo';
+    }
+    if (!/^[^\s/]+\/[^\s/]+$/.test(inputs.targetRepo)) {
+        return 'Invalid target repo format. Expected owner/repo';
+    }
+    if (!inputs.token && !inputs.dryRun && !inputs.preview) {
+        return 'No token provided. Use --token or set GITHUB_TOKEN (or run with --dry-run/--preview/--no-commit)';
+    }
+    return null;
+}
+
+
+/***/ }),
+
+/***/ 1227:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createLogger = createLogger;
+function createScopedLogger(scopes) {
+    const prefix = scopes.length > 0 ? `[${scopes.join(':')}]` : '';
+    const write = (level, ...args) => {
+        if (level === 'warn') {
+            if (prefix)
+                console.warn(prefix, ...args);
+            else
+                console.warn(...args);
+            return;
+        }
+        if (level === 'error') {
+            if (prefix)
+                console.error(prefix, ...args);
+            else
+                console.error(...args);
+            return;
+        }
+        if (prefix)
+            console.log(prefix, ...args);
+        else
+            console.log(...args);
+    };
+    return {
+        info: (...args) => write('info', ...args),
+        warn: (...args) => write('warn', ...args),
+        error: (...args) => write('error', ...args),
+        child: (scope) => createScopedLogger([...scopes, scope]),
+    };
+}
+function createLogger(scope) {
+    return createScopedLogger(scope ? [scope] : []);
+}
+
+
+/***/ }),
+
+/***/ 3222:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getGitRepoFromPipeline = getGitRepoFromPipeline;
+exports.getGitBranchFromPipeline = getGitBranchFromPipeline;
+function findGitCheckoutStep(pkgDoc) {
+    const pipeline = pkgDoc && pkgDoc.pipeline;
+    if (!Array.isArray(pipeline))
+        return null;
+    for (const step of pipeline) {
+        if (step && step.uses === 'git-checkout') {
+            return step;
+        }
+    }
+    return null;
+}
+function getGitRepoFromPipeline(pkgDoc) {
+    return findGitCheckoutStep(pkgDoc)?.with?.repository || '';
+}
+function getGitBranchFromPipeline(pkgDoc) {
+    return findGitCheckoutStep(pkgDoc)?.with?.branch || '';
+}
+
+
+/***/ }),
+
+/***/ 8782:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.applyTransforms = applyTransforms;
+exports.shouldIgnoreVersion = shouldIgnoreVersion;
+const semver_1 = __importDefault(__nccwpck_require__(2088));
+const DEFAULT_IGNORE_REGEX_PATTERNS = [
+    '*alpha*',
+    '*rc*',
+    '*beta*',
+    '*pre*',
+    '*preview*',
+    '*dev*',
+    '*nightly*',
+    '*snapshot*',
+    '*eap*',
+    '*canary*',
+];
+function stripAffixes(cfg, v) {
+    let out = v;
+    if (!cfg)
+        return out;
+    if (cfg.strip_prefix && out.startsWith(cfg.strip_prefix)) {
+        out = out.slice(cfg.strip_prefix.length);
+    }
+    if (cfg.strip_suffix && out.endsWith(cfg.strip_suffix)) {
+        out = out.slice(0, -cfg.strip_suffix.length);
+    }
+    return out;
+}
+function applyVersionTransformsList(list, v) {
+    if (!Array.isArray(list))
+        return v;
+    let out = v;
+    for (const rule of list) {
+        if (!rule || !rule.match || rule.replace === undefined)
+            continue;
+        try {
+            const re = new RegExp(rule.match);
+            out = out.replace(re, rule.replace);
+        }
+        catch (_) {
+            // ignore bad regex
+        }
+    }
+    return out;
+}
+function globToRegex(pat) {
+    // Escape regex meta, then convert glob asterisks to .*
+    const escaped = pat.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+    return escaped.replace(/\*/g, '.*');
+}
+function applyTransforms(updateConfig, versionStr) {
+    let v = versionStr;
+    if (!v)
+        return v;
+    if (updateConfig?.version_separator) {
+        v = v.split(updateConfig.version_separator).join('.');
+    }
+    if (updateConfig?.release_monitor) {
+        v = stripAffixes(updateConfig.release_monitor, v);
+    }
+    if (updateConfig?.github) {
+        v = stripAffixes(updateConfig.github, v);
+    }
+    if (updateConfig?.git) {
+        v = stripAffixes(updateConfig.git, v);
+    }
+    if (updateConfig?.version_transform) {
+        v = applyVersionTransformsList(updateConfig.version_transform, v);
+    }
+    if (!semver_1.default.valid(v)) {
+        const coerced = semver_1.default.coerce(v);
+        if (coerced)
+            v = coerced.version;
+    }
+    return v;
+}
+function resolveIgnorePatterns(updateConfig) {
+    const custom = Array.isArray(updateConfig?.ignore_regex_patterns) ? updateConfig.ignore_regex_patterns : [];
+    return [...DEFAULT_IGNORE_REGEX_PATTERNS, ...custom];
+}
+function shouldIgnoreVersion(updateConfig, versionStr, rawVersionStr) {
+    const patterns = resolveIgnorePatterns(updateConfig);
+    const candidates = [versionStr, rawVersionStr].filter((v) => Boolean(v));
+    for (const pat of patterns) {
+        for (const candidate of candidates) {
+            try {
+                const re = new RegExp(pat, 'i');
+                if (re.test(candidate))
+                    return true;
+            }
+            catch (_) {
+                try {
+                    const re = new RegExp(globToRegex(pat), 'i');
+                    if (re.test(candidate))
+                        return true;
+                }
+                catch (_) {
+                    // ignore malformed regex
+                }
+            }
+        }
+    }
+    return false;
+}
+
+
+/***/ }),
+
+/***/ 7943:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.normalizeKeys = normalizeKeys;
+function normalizeKeys(obj) {
+    if (obj === null || obj === undefined)
+        return obj;
+    if (Array.isArray(obj))
+        return obj.map((item) => normalizeKeys(item));
+    if (typeof obj !== 'object')
+        return obj;
+    const out = {};
+    for (const key of Object.keys(obj)) {
+        const normalizedKey = key.replace(/-/g, '_');
+        out[normalizedKey] = normalizeKeys(obj[key]);
+    }
+    return out;
+}
+
+
+/***/ }),
+
+/***/ 4314:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.discoverPackageUpdate = discoverPackageUpdate;
+const semver_1 = __importDefault(__nccwpck_require__(2088));
+const commitResolver_1 = __nccwpck_require__(3147);
+const gitTags_1 = __nccwpck_require__(9451);
+const githubReleases_1 = __nccwpck_require__(4005);
+const pipeline_1 = __nccwpck_require__(3222);
+const releaseMonitor_1 = __nccwpck_require__(9829);
+const transform_1 = __nccwpck_require__(8782);
+const updateConfig_1 = __nccwpck_require__(7943);
+const logger_1 = __nccwpck_require__(1227);
+async function discoverPackageUpdate({ name, pkg, octo, releaseMonitorToken, logger, }) {
+    const log = logger || (0, logger_1.createLogger)(`discover:${name}`);
+    const updateCfgRaw = pkg.doc.update || {};
+    const updateCfg = (0, updateConfig_1.normalizeKeys)(updateCfgRaw);
+    if (updateCfg.enabled === false) {
+        log.info('update.enabled is false - skipping');
+        return null;
+    }
+    const isManual = updateCfg.manual === true;
+    let latest = '';
+    let latestSource = '';
+    let tagForCommit = '';
+    let repoUrlForCommit = '';
+    let branchForCommit = '';
+    let githubOwner = '';
+    let githubRepoName = '';
+    if (updateCfg.release_monitor?.identifier) {
+        const id = updateCfg.release_monitor.identifier;
+        log.info(`querying release-monitor id ${id}`);
+        latest = await (0, releaseMonitor_1.getLatestReleaseVersion)(id, {
+            token: releaseMonitorToken,
+            version_filter_prefix: updateCfg.release_monitor.version_filter_prefix,
+            version_filter_contains: updateCfg.release_monitor.version_filter_contains,
+        });
+        latestSource = 'release-monitor';
+        repoUrlForCommit = updateCfg.git?.repository || (0, pipeline_1.getGitRepoFromPipeline)(pkg.doc);
+        branchForCommit = updateCfg.git?.branch || (0, pipeline_1.getGitBranchFromPipeline)(pkg.doc);
+    }
+    if (!latest && updateCfg.github?.identifier) {
+        const [owner, repo] = (updateCfg.github.identifier || '').split('/');
+        if (owner && repo) {
+            log.info(`querying GitHub releases ${owner}/${repo}`);
+            latest = await (0, githubReleases_1.getLatestGithubRelease)(owner, repo, octo, {
+                useTag: !!updateCfg.github.use_tag,
+                tag_filter_prefix: updateCfg.github.tag_filter_prefix,
+                tag_filter_contains: updateCfg.github.tag_filter_contains || updateCfg.github.tag_filter,
+            });
+            if (latest) {
+                latestSource = 'github';
+                tagForCommit = latest;
+                githubOwner = owner;
+                githubRepoName = repo;
+            }
+        }
+    }
+    if (!latest && updateCfg.git) {
+        const repoUrl = updateCfg.git.repository || (0, pipeline_1.getGitRepoFromPipeline)(pkg.doc);
+        if (repoUrl) {
+            log.info(`querying git tags from ${repoUrl}`);
+            try {
+                latest = (0, gitTags_1.getLatestGitTag)(repoUrl, {
+                    tag_filter_prefix: updateCfg.git.tag_filter_prefix,
+                    tag_filter_contains: updateCfg.git.tag_filter_contains,
+                });
+                if (latest) {
+                    latestSource = 'git';
+                    repoUrlForCommit = repoUrl;
+                    tagForCommit = latest;
+                    branchForCommit = updateCfg.git.branch || (0, pipeline_1.getGitBranchFromPipeline)(pkg.doc) || '';
+                }
+            }
+            catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                log.warn(`failed to query git tags: ${msg}`);
+            }
+        }
+    }
+    if (!latest) {
+        log.info('no candidate latest version found');
+        return null;
+    }
+    const transformed = (0, transform_1.applyTransforms)(updateCfg, latest);
+    log.info(`latest raw=${latest} transformed=${transformed}`);
+    if ((0, transform_1.shouldIgnoreVersion)(updateCfg, transformed, latest)) {
+        log.info(`version ${transformed} ignored by ignore-regex-patterns`);
+        return null;
+    }
+    const currentVersion = pkg.doc.package?.version || pkg.doc.Package?.version || '';
+    if (!currentVersion) {
+        log.info('no current version in package metadata');
+    }
+    let shouldUpdate = false;
+    if (semver_1.default.valid(transformed) && semver_1.default.valid(currentVersion)) {
+        shouldUpdate = semver_1.default.gt(transformed, currentVersion);
+    }
+    else if (transformed !== currentVersion) {
+        shouldUpdate = true;
+    }
+    if (!shouldUpdate) {
+        return null;
+    }
+    log.info(`will update ${currentVersion} -> ${transformed}${isManual ? ' (manual)' : ''}`);
+    let commitSha = '';
+    const tagCandidates = [];
+    if (tagForCommit && transformed && transformed !== tagForCommit && (latestSource === 'github' || latestSource === 'git')) {
+        tagCandidates.push(transformed);
+    }
+    if (tagForCommit) {
+        tagCandidates.push(tagForCommit);
+    }
+    if (!isManual) {
+        commitSha = await (0, commitResolver_1.resolveExpectedCommit)({
+            source: latestSource,
+            tag: tagForCommit,
+            tagCandidates,
+            repoUrl: repoUrlForCommit,
+            branch: branchForCommit,
+            owner: githubOwner,
+            repo: githubRepoName,
+            octo,
+            packageName: name,
+        });
+    }
+    return {
+        from: currentVersion,
+        to: transformed,
+        file: pkg.file,
+        manual: isManual,
+        commit: commitSha,
+    };
+}
+
+
+/***/ }),
+
+/***/ 9407:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const minimist_1 = __importDefault(__nccwpck_require__(994));
+const core = __importStar(__nccwpck_require__(7484));
+const actionUtils_1 = __nccwpck_require__(2392);
+const inputs_1 = __nccwpck_require__(9114);
+const contextWorkflow_1 = __nccwpck_require__(2376);
+const discoveryWorkflow_1 = __nccwpck_require__(1425);
+const modeWorkflow_1 = __nccwpck_require__(2066);
+const prWorkflow_1 = __nccwpck_require__(7509);
+const logger_1 = __nccwpck_require__(1227);
+const logger = (0, logger_1.createLogger)('index');
+async function main() {
+    const argv = (0, minimist_1.default)(process.argv.slice(2));
+    const inputs = (0, inputs_1.collectRuntimeInputs)(argv);
+    const validationError = (0, inputs_1.validateRuntimeInputs)(inputs);
+    if (validationError) {
+        (0, actionUtils_1.failAndExit)(validationError);
+    }
+    const workflowContext = (0, contextWorkflow_1.createWorkflowContext)(inputs);
+    const discovery = await (0, discoveryWorkflow_1.discoverUpdates)(workflowContext, inputs);
+    const modeHandled = await (0, modeWorkflow_1.handleNonPrModes)(workflowContext, inputs, discovery.packages, discovery.updates, discovery.packageErrors);
+    if (modeHandled) {
+        const updateEntries = Object.entries(discovery.updates);
+        const manualUpdates = updateEntries.filter(([, u]) => u.manual);
+        const mode = updateEntries.length === 0 ? 'no-updates' : inputs.dryRun ? 'dry-run' : 'preview';
+        await (0, actionUtils_1.writeSummary)({ mode, updates: discovery.updates, manualUpdates, packageErrors: discovery.packageErrors });
+        return;
+    }
+    const updateEntries = Object.entries(discovery.updates);
+    const manualUpdates = updateEntries.filter(([, u]) => u.manual);
+    const nonManualUpdates = updateEntries.filter(([, u]) => !u.manual);
+    if (nonManualUpdates.length === 0) {
+        logger.info('Only manual updates detected; nothing to auto-apply.');
+        await (0, actionUtils_1.writeSummary)({ mode: 'manual-only', updates: discovery.updates, manualUpdates, packageErrors: discovery.packageErrors });
+        return;
+    }
+    const prResult = await (0, prWorkflow_1.runPrWorkflow)(workflowContext, inputs, discovery.packages, nonManualUpdates);
+    const allErrors = [...discovery.packageErrors, ...prResult.packageErrors];
+    if (manualUpdates.length > 0) {
+        logger.info('Manual updates were detected and not auto-applied:', manualUpdates.map(([n, update]) => `${n} (${update.from} -> ${update.to})`).join(', '));
+    }
+    logger.info(`PRs created: ${prResult.createdPRs.length}`);
+    prResult.createdPRs.forEach((p) => logger.info(`- ${p.name}: ${p.url}`));
+    if (prResult.failedPackages.length) {
+        logger.warn(`Packages that failed to push/PR: ${prResult.failedPackages.join(', ')}`);
+    }
+    logger.info('Done.');
+    await (0, actionUtils_1.writeSummary)({
+        mode: 'pr',
+        updates: discovery.updates,
+        createdPRs: prResult.createdPRs,
+        manualUpdates,
+        failedPackages: prResult.failedPackages,
+        packageErrors: allErrors,
+    });
+}
+main().catch((err) => {
+    logger.error(err);
+    try {
+        core.setFailed(err.message || String(err));
+    }
+    catch (_) {
+        // Ignore when core is unavailable in CLI mode.
+    }
+    process.exit(1);
+});
+
+
+/***/ }),
+
+/***/ 2333:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createIssueForPackage = createIssueForPackage;
+exports.createPullRequestWithLabels = createPullRequestWithLabels;
+exports.findOpenPullRequestByHead = findOpenPullRequestByHead;
+const core = __importStar(__nccwpck_require__(7484));
+const actionUtils_1 = __nccwpck_require__(2392);
+const logger_1 = __nccwpck_require__(1227);
+const logger = (0, logger_1.createLogger)('githubActions');
+async function createIssueForPackage({ octo, targetRepo, token, pkgName, message, phase }) {
+    const safeMessage = (0, actionUtils_1.redactSecrets)(message);
+    if (!token) {
+        logger.warn(`Cannot create issue for ${pkgName} (${phase}): no token available.`);
+        return null;
+    }
+    try {
+        const [owner, repo] = targetRepo.split('/');
+        const title = `melange updater failure for ${pkgName}`;
+        // Avoid duplicate issues for the same package/title if an open one already exists.
+        const existing = await octo.rest.issues.listForRepo({ owner, repo, state: 'open', per_page: 50 });
+        const dup = existing.data.find((i) => i.title === title);
+        if (dup) {
+            logger.info(`Issue already exists for ${pkgName}: ${dup.html_url}`);
+            return dup;
+        }
+        const body = `melange updater encountered an error ${phase ? `during ${phase} ` : ''}for package **${pkgName}**.\n\nError: ${safeMessage}`;
+        const { data: issue } = await octo.rest.issues.create({ owner, repo, title, body });
+        logger.info(`Created issue for ${pkgName}: ${title}`);
+        return issue;
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        logger.warn(`Failed to create issue for ${pkgName}: ${msg}`);
+        try {
+            core.warning(msg);
+        }
+        catch (_) { }
+        return null;
+    }
+}
+async function createPullRequestWithLabels({ octo, owner, repo, title, head, base, body, labels = [] }) {
+    const { data: pr } = await octo.rest.pulls.create({ owner, repo, title, head, base, body });
+    logger.info('Created PR:', pr.html_url);
+    if (labels.length > 0) {
+        try {
+            await octo.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels });
+            logger.info(`Added labels to PR ${pr.number}: ${labels.join(', ')}`);
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            logger.warn(`Failed adding labels for PR ${pr.number}: ${msg}`);
+            try {
+                core.warning(msg);
+            }
+            catch (_) { }
+        }
+    }
+    return pr;
+}
+async function findOpenPullRequestByHead({ octo, owner, repo, head }) {
+    const { data: pulls } = await octo.rest.pulls.list({ owner, repo, state: 'open', head: `${owner}:${head}`, per_page: 1 });
+    return pulls[0] ?? null;
+}
+
+
+/***/ }),
+
+/***/ 2910:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.loadPackageDoc = loadPackageDoc;
+exports.findMelangePackages = findMelangePackages;
+exports.bumpWithMelangeTool = bumpWithMelangeTool;
+const fs_1 = __importDefault(__nccwpck_require__(9896));
+const path_1 = __importDefault(__nccwpck_require__(6928));
+const glob_1 = __nccwpck_require__(1363);
+const js_yaml_1 = __importDefault(__nccwpck_require__(4281));
+const child_process_1 = __nccwpck_require__(5317);
+function loadPackageDoc(file) {
+    const raw = fs_1.default.readFileSync(file, 'utf8');
+    return js_yaml_1.default.load(raw);
+}
+function findMelangePackages(repoPath) {
+    const pattern = path_1.default.join(repoPath, '**/*.yaml');
+    const files = (0, glob_1.globSync)(pattern, { nodir: true, ignore: ['**/node_modules/**', '**/.git/**'] });
+    const packages = {};
+    for (const file of files) {
+        try {
+            const doc = loadPackageDoc(file);
+            if (doc && (doc.package || doc.Package) && doc.update) {
+                const name = doc.package?.name || doc.Package?.name || path_1.default.basename(file);
+                packages[name] = { file, doc };
+            }
+        }
+        catch (_) {
+            // ignore parse errors
+        }
+    }
+    return packages;
+}
+function bumpWithMelangeTool({ repoPath, packageFile, version, expectedCommit }) {
+    const relPath = path_1.default.relative(repoPath, packageFile);
+    const expectedArg = expectedCommit ? ` --expected-commit ${expectedCommit}` : '';
+    const cmd = `docker run --rm -v "${repoPath}":/work -w /work cgr.dev/chainguard/melange:latest bump ${relPath} ${version}${expectedArg}`;
+    (0, child_process_1.execSync)(cmd, { stdio: 'inherit' });
+}
+
+
+/***/ }),
+
+/***/ 3147:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -33696,7 +34004,7 @@ async function resolveExpectedCommit({ source, tag, tagCandidates = [], repoUrl,
 
 /***/ }),
 
-/***/ 7082:
+/***/ 9451:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -33739,7 +34047,7 @@ function pickLatestTag(tags, opts = {}) {
         semverCandidates.sort((a, b) => semver_1.default.rcompare(a.v, b.v));
         return semverCandidates[0].tag;
     }
-    return filtered[0];
+    return [...filtered].sort((a, b) => b.localeCompare(a))[0];
 }
 function getLatestGitTag(repoUrl, opts = {}) {
     const tags = listRemoteTags(repoUrl);
@@ -33749,109 +34057,7 @@ function getLatestGitTag(repoUrl, opts = {}) {
 
 /***/ }),
 
-/***/ 833:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.createIssueForPackage = createIssueForPackage;
-exports.createPullRequestWithLabels = createPullRequestWithLabels;
-exports.findOpenPullRequestByHead = findOpenPullRequestByHead;
-const core = __importStar(__nccwpck_require__(7484));
-const actionUtils_1 = __nccwpck_require__(7740);
-async function createIssueForPackage({ octo, targetRepo, token, pkgName, message, phase }) {
-    const safeMessage = (0, actionUtils_1.redactSecrets)(message);
-    if (!token) {
-        console.warn(`Cannot create issue for ${pkgName} (${phase}): no token available.`);
-        return null;
-    }
-    try {
-        const [owner, repo] = targetRepo.split('/');
-        const title = `melange updater failure for ${pkgName}`;
-        // Avoid duplicate issues for the same package/title if an open one already exists.
-        const existing = await octo.rest.issues.listForRepo({ owner, repo, state: 'open', per_page: 50 });
-        const dup = existing.data.find((i) => i.title === title);
-        if (dup) {
-            console.log(`Issue already exists for ${pkgName}: ${dup.html_url}`);
-            return dup;
-        }
-        const body = `melange updater encountered an error ${phase ? `during ${phase} ` : ''}for package **${pkgName}**.\n\nError: ${safeMessage}`;
-        const { data: issue } = await octo.rest.issues.create({ owner, repo, title, body });
-        console.log(`Created issue for ${pkgName}: ${title}`);
-        return issue;
-    }
-    catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn(`Failed to create issue for ${pkgName}: ${msg}`);
-        try {
-            core.warning(msg);
-        }
-        catch (_) { }
-        return null;
-    }
-}
-async function createPullRequestWithLabels({ octo, owner, repo, title, head, base, body, labels = [] }) {
-    const { data: pr } = await octo.rest.pulls.create({ owner, repo, title, head, base, body });
-    console.log('Created PR:', pr.html_url);
-    if (labels.length > 0) {
-        try {
-            await octo.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels });
-            console.log(`Added labels to PR ${pr.number}: ${labels.join(', ')}`);
-        }
-        catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            console.warn(`Failed adding labels for PR ${pr.number}: ${msg}`);
-            try {
-                core.warning(msg);
-            }
-            catch (_) { }
-        }
-    }
-    return pr;
-}
-async function findOpenPullRequestByHead({ octo, owner, repo, head }) {
-    const { data: pulls } = await octo.rest.pulls.list({ owner, repo, state: 'open', head: `${owner}:${head}`, per_page: 1 });
-    return pulls[0] ?? null;
-}
-
-
-/***/ }),
-
-/***/ 1898:
+/***/ 4005:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
@@ -33899,90 +34105,7 @@ async function getLatestGithubRelease(owner, repo, octo, options = {}) {
 
 /***/ }),
 
-/***/ 9810:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.loadPackageDoc = loadPackageDoc;
-exports.findMelangePackages = findMelangePackages;
-exports.bumpWithMelangeTool = bumpWithMelangeTool;
-const fs_1 = __importDefault(__nccwpck_require__(9896));
-const path_1 = __importDefault(__nccwpck_require__(6928));
-const glob_1 = __nccwpck_require__(1363);
-const js_yaml_1 = __importDefault(__nccwpck_require__(4281));
-const child_process_1 = __nccwpck_require__(5317);
-function loadPackageDoc(file) {
-    const raw = fs_1.default.readFileSync(file, 'utf8');
-    return js_yaml_1.default.load(raw);
-}
-function findMelangePackages(repoPath) {
-    const pattern = path_1.default.join(repoPath, '**/*.yaml');
-    const files = (0, glob_1.globSync)(pattern, { nodir: true, ignore: ['**/node_modules/**', '**/.git/**'] });
-    const packages = {};
-    for (const file of files) {
-        try {
-            const doc = loadPackageDoc(file);
-            if (doc && (doc.package || doc.Package) && doc.update) {
-                const name = doc.package?.name || doc.Package?.name || path_1.default.basename(file);
-                packages[name] = { file, doc };
-            }
-        }
-        catch (_) {
-            // ignore parse errors
-        }
-    }
-    return packages;
-}
-function bumpWithMelangeTool({ repoPath, packageFile, version, expectedCommit }) {
-    const relPath = path_1.default.relative(repoPath, packageFile);
-    const expectedArg = expectedCommit ? ` --expected-commit ${expectedCommit}` : '';
-    const cmd = `docker run --rm -v "${repoPath}":/work -w /work cgr.dev/chainguard/melange:latest bump ${relPath} ${version}${expectedArg}`;
-    (0, child_process_1.execSync)(cmd, { stdio: 'inherit' });
-}
-
-
-/***/ }),
-
-/***/ 6181:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getGitRepoFromPipeline = getGitRepoFromPipeline;
-exports.getGitBranchFromPipeline = getGitBranchFromPipeline;
-function getGitRepoFromPipeline(pkgDoc) {
-    const pipeline = pkgDoc && pkgDoc.pipeline;
-    if (!Array.isArray(pipeline))
-        return '';
-    for (const step of pipeline) {
-        if (step && step.uses === 'git-checkout' && step.with && step.with.repository) {
-            return step.with.repository;
-        }
-    }
-    return '';
-}
-function getGitBranchFromPipeline(pkgDoc) {
-    const pipeline = pkgDoc && pkgDoc.pipeline;
-    if (!Array.isArray(pipeline))
-        return '';
-    for (const step of pipeline) {
-        if (step && step.uses === 'git-checkout' && step.with && step.with.branch) {
-            return step.with.branch;
-        }
-    }
-    return '';
-}
-
-
-/***/ }),
-
-/***/ 6242:
+/***/ 9829:
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -34052,7 +34175,7 @@ async function getLatestReleaseVersion(identifier, opts = {}) {
 
 /***/ }),
 
-/***/ 8315:
+/***/ 2376:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -34061,133 +34184,309 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.applyTransforms = applyTransforms;
-exports.shouldIgnoreVersion = shouldIgnoreVersion;
-const semver_1 = __importDefault(__nccwpck_require__(2088));
-const DEFAULT_IGNORE_REGEX_PATTERNS = [
-    '*alpha*',
-    '*rc*',
-    '*beta*',
-    '*pre*',
-    '*preview*',
-    '*dev*',
-    '*nightly*',
-    '*snapshot*',
-    '*eap*',
-    '*canary*',
-];
-function stripAffixes(cfg, v) {
-    let out = v;
-    if (!cfg)
-        return out;
-    if (cfg.strip_prefix && out.startsWith(cfg.strip_prefix)) {
-        out = out.slice(cfg.strip_prefix.length);
+exports.createWorkflowContext = createWorkflowContext;
+const path_1 = __importDefault(__nccwpck_require__(6928));
+const rest_1 = __nccwpck_require__(9380);
+const actionUtils_1 = __nccwpck_require__(2392);
+const logger_1 = __nccwpck_require__(1227);
+function createWorkflowContext(inputs) {
+    const logger = (0, logger_1.createLogger)('workflow');
+    const absRepoPath = path_1.default.resolve(process.cwd(), inputs.repoPath);
+    logger.info('Repository path:', absRepoPath);
+    const dockerError = (0, actionUtils_1.ensureDockerAvailable)();
+    if (dockerError) {
+        (0, actionUtils_1.failAndExit)(dockerError);
     }
-    if (cfg.strip_suffix && out.endsWith(cfg.strip_suffix)) {
-        out = out.slice(0, -cfg.strip_suffix.length);
-    }
-    return out;
+    return {
+        absRepoPath,
+        octo: new rest_1.Octokit({ auth: inputs.token }),
+        issueTracker: new Set(),
+        logger,
+    };
 }
-function applyVersionTransformsList(list, v) {
-    if (!Array.isArray(list))
-        return v;
-    let out = v;
-    for (const rule of list) {
-        if (!rule || !rule.match || rule.replace === undefined)
-            continue;
+
+
+/***/ }),
+
+/***/ 1425:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.discoverUpdates = discoverUpdates;
+const actionUtils_1 = __nccwpck_require__(2392);
+const versionDiscovery_1 = __nccwpck_require__(4314);
+const melange_1 = __nccwpck_require__(2910);
+const failureWorkflow_1 = __nccwpck_require__(365);
+async function discoverUpdates(ctx, inputs) {
+    const packages = (0, melange_1.findMelangePackages)(ctx.absRepoPath);
+    ctx.logger.info('Found', Object.keys(packages).length, 'candidate melange packages');
+    const updates = {};
+    const packageErrors = [];
+    for (const [name, pkg] of Object.entries(packages)) {
+        const pkgLogger = ctx.logger.child(`discover:${name}`);
         try {
-            const re = new RegExp(rule.match);
-            out = out.replace(re, rule.replace);
-        }
-        catch (_) {
-            // ignore bad regex
-        }
-    }
-    return out;
-}
-function globToRegex(pat) {
-    // Escape regex meta, then convert glob asterisks to .*
-    const escaped = pat.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-    return escaped.replace(/\*/g, '.*');
-}
-function applyTransforms(updateConfig, versionStr) {
-    let v = versionStr;
-    if (!v)
-        return v;
-    if (updateConfig?.version_separator) {
-        v = v.split(updateConfig.version_separator).join('.');
-    }
-    if (updateConfig?.release_monitor) {
-        v = stripAffixes(updateConfig.release_monitor, v);
-    }
-    if (updateConfig?.github) {
-        v = stripAffixes(updateConfig.github, v);
-    }
-    if (updateConfig?.git) {
-        v = stripAffixes(updateConfig.git, v);
-    }
-    if (updateConfig?.version_transform) {
-        v = applyVersionTransformsList(updateConfig.version_transform, v);
-    }
-    if (!semver_1.default.valid(v)) {
-        const coerced = semver_1.default.coerce(v);
-        if (coerced)
-            v = coerced.version;
-    }
-    return v;
-}
-function resolveIgnorePatterns(updateConfig) {
-    const custom = Array.isArray(updateConfig?.ignore_regex_patterns) ? updateConfig.ignore_regex_patterns : [];
-    return [...DEFAULT_IGNORE_REGEX_PATTERNS, ...custom];
-}
-function shouldIgnoreVersion(updateConfig, versionStr, rawVersionStr) {
-    const patterns = resolveIgnorePatterns(updateConfig);
-    const candidates = [versionStr, rawVersionStr].filter((v) => Boolean(v));
-    for (const pat of patterns) {
-        for (const candidate of candidates) {
-            try {
-                const re = new RegExp(pat, 'i');
-                if (re.test(candidate))
-                    return true;
+            const update = await (0, versionDiscovery_1.discoverPackageUpdate)({
+                name,
+                pkg,
+                octo: ctx.octo,
+                releaseMonitorToken: inputs.releaseMonitorToken,
+                logger: pkgLogger,
+            });
+            if (update) {
+                updates[name] = update;
             }
-            catch (_) {
-                try {
-                    const re = new RegExp(globToRegex(pat), 'i');
-                    if (re.test(candidate))
-                        return true;
-                }
-                catch (_) {
-                    // ignore malformed regex
-                }
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            const safeMsg = (0, actionUtils_1.redactSecrets)(msg);
+            pkgLogger.warn(`failed to process package: ${safeMsg}`);
+            packageErrors.push({ name, phase: 'version discovery', message: safeMsg });
+            if (!inputs.dryRun && !inputs.preview) {
+                await (0, failureWorkflow_1.reportPackageFailure)(ctx, inputs, name, 'version discovery', safeMsg);
             }
         }
     }
+    return { packages, updates, packageErrors };
+}
+
+
+/***/ }),
+
+/***/ 365:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.reportPackageFailure = reportPackageFailure;
+const githubActions_1 = __nccwpck_require__(2333);
+async function reportPackageFailure(ctx, inputs, pkgName, phase, safeMessage) {
+    const issueKey = `${pkgName}|${phase}`;
+    if (ctx.issueTracker.has(issueKey)) {
+        return;
+    }
+    await (0, githubActions_1.createIssueForPackage)({
+        octo: ctx.octo,
+        targetRepo: inputs.targetRepo,
+        token: inputs.token,
+        pkgName,
+        message: safeMessage,
+        phase,
+    });
+    ctx.issueTracker.add(issueKey);
+}
+
+
+/***/ }),
+
+/***/ 2066:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.handleNonPrModes = handleNonPrModes;
+const melange_1 = __nccwpck_require__(2910);
+async function handleNonPrModes(ctx, inputs, packages, updates, packageErrors) {
+    const updateEntries = Object.entries(updates);
+    if (updateEntries.length === 0) {
+        ctx.logger.info('No updates detected. Exiting without creating a branch.');
+        if (inputs.dryRun)
+            ctx.logger.info('Dry run mode: nothing was changed.');
+        return true;
+    }
+    if (inputs.dryRun) {
+        ctx.logger.info('Dry run enabled - the following updates would be applied:');
+        ctx.logger.info(JSON.stringify(updates, null, 2));
+        return true;
+    }
+    if (inputs.preview) {
+        for (const [name, u] of Object.entries(updates)) {
+            if (u.manual)
+                continue;
+            const pkg = packages[name];
+            if (!pkg)
+                continue;
+            (0, melange_1.bumpWithMelangeTool)({ repoPath: ctx.absRepoPath, packageFile: pkg.file, version: u.to, expectedCommit: u.commit });
+        }
+        ctx.logger.info('Preview mode: updates applied locally; no branch/commit/push/PR.');
+        return true;
+    }
+    void packageErrors;
     return false;
 }
 
 
 /***/ }),
 
-/***/ 1336:
-/***/ ((__unused_webpack_module, exports) => {
+/***/ 7509:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.normalizeKeys = normalizeKeys;
-function normalizeKeys(obj) {
-    if (obj === null || obj === undefined)
-        return obj;
-    if (Array.isArray(obj))
-        return obj.map((item) => normalizeKeys(item));
-    if (typeof obj !== 'object')
-        return obj;
-    const out = {};
-    for (const key of Object.keys(obj)) {
-        const normalizedKey = key.replace(/-/g, '_');
-        out[normalizedKey] = normalizeKeys(obj[key]);
+exports.runPrWorkflow = runPrWorkflow;
+const actionUtils_1 = __nccwpck_require__(2392);
+const githubActions_1 = __nccwpck_require__(2333);
+const melange_1 = __nccwpck_require__(2910);
+const failureWorkflow_1 = __nccwpck_require__(365);
+async function resolveRepoInfo(ctx, inputs) {
+    const [owner, repo] = inputs.targetRepo.split('/');
+    const { data: repoData } = await ctx.octo.rest.repos.get({ owner, repo });
+    const defaultBranch = repoData.default_branch || 'main';
+    const startingBranch = (0, actionUtils_1.execGetOutput)('git rev-parse --abbrev-ref HEAD', ctx.absRepoPath).trim() || defaultBranch;
+    const remoteUrl = `https://x-access-token:${inputs.token}@github.com/${inputs.targetRepo}.git`;
+    return { owner, repo, defaultBranch, startingBranch, remoteUrl };
+}
+function configureGitIdentity(ctx, inputs) {
+    (0, actionUtils_1.run)(`git config user.name "${(0, actionUtils_1.escapeShell)(inputs.gitAuthorName)}"`, { cwd: ctx.absRepoPath });
+    (0, actionUtils_1.run)(`git config user.email "${(0, actionUtils_1.escapeShell)(inputs.gitAuthorEmail)}"`, { cwd: ctx.absRepoPath });
+}
+async function prepareUpdateBranch(ctx, repoInfo, pkgName, pkgFile, targetVersion, createdPRs) {
+    (0, actionUtils_1.run)(`git checkout ${repoInfo.defaultBranch}`, { cwd: ctx.absRepoPath });
+    const safeName = (0, actionUtils_1.sanitizeName)(pkgName);
+    const branch = `melange-update-${safeName}`;
+    const remoteHead = (0, actionUtils_1.execGetOutput)(`git ls-remote ${repoInfo.remoteUrl} refs/heads/${branch}`, ctx.absRepoPath).trim();
+    const branchExistsRemote = !!remoteHead;
+    if (!branchExistsRemote) {
+        (0, actionUtils_1.run)(`git checkout -B ${branch} ${repoInfo.defaultBranch}`, { cwd: ctx.absRepoPath });
+        return { branch, skip: false };
     }
-    return out;
+    (0, actionUtils_1.run)(`git fetch ${repoInfo.remoteUrl} ${branch}:${branch}`, { cwd: ctx.absRepoPath });
+    (0, actionUtils_1.run)(`git checkout ${branch}`, { cwd: ctx.absRepoPath });
+    try {
+        const pkgDoc = (0, melange_1.loadPackageDoc)(pkgFile) || {};
+        const branchVersion = pkgDoc.package?.version || pkgDoc.Package?.version;
+        if (branchVersion === targetVersion) {
+            ctx.logger.info(`${pkgName}: branch already at target version; skipping bump.`);
+            const existingPr = await (0, githubActions_1.findOpenPullRequestByHead)({
+                octo: ctx.octo,
+                owner: repoInfo.owner,
+                repo: repoInfo.repo,
+                head: branch,
+            });
+            if (existingPr) {
+                createdPRs.push({ name: pkgName, url: existingPr.html_url });
+            }
+            (0, actionUtils_1.run)(`git checkout ${repoInfo.defaultBranch}`, { cwd: ctx.absRepoPath });
+            return { branch, skip: true };
+        }
+    }
+    catch (readErr) {
+        ctx.logger.warn(`${pkgName}: failed to read branch package for idempotence check: ${readErr instanceof Error ? readErr.message : String(readErr)}`);
+    }
+    return { branch, skip: false };
+}
+async function bumpCommitAndPush(ctx, repoInfo, inputs, pkgName, pkgFile, update, branch, failedPackages, packageErrors) {
+    try {
+        (0, melange_1.bumpWithMelangeTool)({ repoPath: ctx.absRepoPath, packageFile: pkgFile, version: update.to, expectedCommit: update.commit });
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const safeMsg = (0, actionUtils_1.redactSecrets)(msg);
+        ctx.logger.warn(`${pkgName}: melange bump failed: ${safeMsg}`);
+        failedPackages.push(pkgName);
+        packageErrors.push({ name: pkgName, phase: 'melange bump', message: safeMsg });
+        await (0, failureWorkflow_1.reportPackageFailure)(ctx, inputs, pkgName, 'melange bump', safeMsg);
+        (0, actionUtils_1.run)(`git checkout ${repoInfo.defaultBranch}`, { cwd: ctx.absRepoPath });
+        return false;
+    }
+    (0, actionUtils_1.run)('git add -A', { cwd: ctx.absRepoPath });
+    const status = (0, actionUtils_1.execGetOutput)('git status --porcelain', ctx.absRepoPath).trim();
+    if (!status) {
+        ctx.logger.info(`${pkgName}: no changes to commit after applying update; skipping push/PR.`);
+        (0, actionUtils_1.run)(`git checkout ${repoInfo.defaultBranch}`, { cwd: ctx.absRepoPath });
+        return false;
+    }
+    (0, actionUtils_1.run)(`git commit -m "chore(update): automatic update for ${(0, actionUtils_1.escapeShell)(pkgName)}"`, { cwd: ctx.absRepoPath });
+    try {
+        (0, actionUtils_1.run)(`git push ${repoInfo.remoteUrl} ${branch}`, { cwd: ctx.absRepoPath });
+        return true;
+    }
+    catch (pushErr) {
+        const msg = pushErr instanceof Error ? pushErr.message : String(pushErr);
+        const safeMsg = (0, actionUtils_1.redactSecrets)(msg);
+        ctx.logger.warn(`Failed to push branch for ${pkgName}: ${safeMsg}`);
+        failedPackages.push(pkgName);
+        packageErrors.push({ name: pkgName, phase: 'git push', message: safeMsg });
+        await (0, failureWorkflow_1.reportPackageFailure)(ctx, inputs, pkgName, 'git push', safeMsg);
+        (0, actionUtils_1.run)(`git checkout ${repoInfo.defaultBranch}`, { cwd: ctx.absRepoPath });
+        return false;
+    }
+}
+async function upsertPackagePullRequest(ctx, inputs, repoInfo, pkgName, update, branch) {
+    const existingPr = await (0, githubActions_1.findOpenPullRequestByHead)({
+        octo: ctx.octo,
+        owner: repoInfo.owner,
+        repo: repoInfo.repo,
+        head: branch,
+    });
+    if (existingPr) {
+        ctx.logger.info(`${pkgName}: updated existing PR ${existingPr.html_url}`);
+        return existingPr.html_url;
+    }
+    const prTitle = `Automated update for ${pkgName}`;
+    const prBody = `This PR updates ${pkgName}: ${update.from} -> ${update.to}${inputs.githubLabels.length ? `\n\nLabels: ${inputs.githubLabels.join(', ')}` : ''}`;
+    const pr = await (0, githubActions_1.createPullRequestWithLabels)({
+        octo: ctx.octo,
+        owner: repoInfo.owner,
+        repo: repoInfo.repo,
+        title: prTitle,
+        head: branch,
+        base: repoInfo.defaultBranch,
+        body: prBody,
+        labels: inputs.githubLabels,
+    });
+    return pr.html_url;
+}
+async function runPrWorkflow(ctx, inputs, packages, nonManualUpdates) {
+    const createdPRs = [];
+    const failedPackages = [];
+    const packageErrors = [];
+    const repoInfo = await resolveRepoInfo(ctx, inputs);
+    const dirtyReason = (0, actionUtils_1.ensureCleanWorkingTree)(ctx.absRepoPath, actionUtils_1.execGetOutput);
+    if (dirtyReason) {
+        (0, actionUtils_1.failAndExit)(dirtyReason);
+    }
+    configureGitIdentity(ctx, inputs);
+    for (const [name, update] of nonManualUpdates) {
+        try {
+            const pkg = packages[name];
+            if (!pkg) {
+                ctx.logger.warn(`Package metadata for ${name} not found; skipping.`);
+                continue;
+            }
+            const branchPrep = await prepareUpdateBranch(ctx, repoInfo, name, pkg.file, update.to, createdPRs);
+            if (branchPrep.skip) {
+                continue;
+            }
+            const pushed = await bumpCommitAndPush(ctx, repoInfo, inputs, name, pkg.file, update, branchPrep.branch, failedPackages, packageErrors);
+            if (!pushed) {
+                continue;
+            }
+            const prUrl = await upsertPackagePullRequest(ctx, inputs, repoInfo, name, update, branchPrep.branch);
+            createdPRs.push({ name, url: prUrl });
+            (0, actionUtils_1.run)(`git checkout ${repoInfo.defaultBranch}`, { cwd: ctx.absRepoPath });
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            const safeMsg = (0, actionUtils_1.redactSecrets)(msg);
+            ctx.logger.warn(`Failed to create PR for ${name}: ${safeMsg}`);
+            packageErrors.push({ name, phase: 'PR creation', message: safeMsg });
+            await (0, failureWorkflow_1.reportPackageFailure)(ctx, inputs, name, 'PR creation', safeMsg);
+            try {
+                (0, actionUtils_1.run)(`git checkout ${repoInfo.defaultBranch}`, { cwd: ctx.absRepoPath });
+            }
+            catch (_) {
+                // Best effort cleanup.
+            }
+            failedPackages.push(name);
+        }
+    }
+    (0, actionUtils_1.run)(`git checkout ${repoInfo.startingBranch}`, { cwd: ctx.absRepoPath });
+    return { createdPRs, failedPackages, packageErrors };
 }
 
 

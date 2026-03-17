@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeKeys } from '../src/lib/updateConfig';
+import { normalizeKeys } from '../src/discovery/updateConfig';
 
 describe('updateConfig.normalizeKeys', () => {
   it('normalizes hyphenated keys recursively', () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 vi.mock('child_process', () => ({ execSync: vi.fn() }));
 import { execSync } from 'child_process';
-import { sanitizeName, escapeShell, ensureCleanWorkingTree, redactSecrets, ensureDockerAvailable } from '../src/lib/actionUtils';
+import { sanitizeName, escapeShell, ensureCleanWorkingTree, redactSecrets, ensureDockerAvailable } from '../src/core/actionUtils';
 
 describe('action utils', () => {
   it('sanitizes names by replacing disallowed characters', () => {

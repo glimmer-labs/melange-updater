@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 vi.mock('child_process', () => ({ execSync: vi.fn() }));
 import { execSync } from 'child_process';
-import { bumpWithMelangeTool } from '../src/lib/melange';
+import { bumpWithMelangeTool } from '../src/integrations/melange';
 
 describe('melange bump helper', () => {
   it('builds docker bump command with expected-commit', () => {
