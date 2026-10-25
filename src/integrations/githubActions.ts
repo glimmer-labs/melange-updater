@@ -53,6 +53,7 @@ interface CreatePullRequestParams {
   base: string;
   body: string;
   labels?: string[];
+  reviewer?: string;
 }
 
 interface FindPullRequestParams {
@@ -62,7 +63,7 @@ interface FindPullRequestParams {
   head: string; // branch name without owner prefix
 }
 
-export async function createPullRequestWithLabels({ octo, owner, repo, title, head, base, body, labels = [] }: CreatePullRequestParams) {
+export async function createPullRequestWithLabels({ octo, owner, repo, title, head, base, body, labels = [], reviewer = '' }: CreatePullRequestParams) {
   const { data: pr } = await octo.rest.pulls.create({ owner, repo, title, head, base, body });
   logger.info('Created PR:', pr.html_url);
   if (labels.length > 0) {
@@ -72,6 +73,18 @@ export async function createPullRequestWithLabels({ octo, owner, repo, title, he
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       logger.warn(`Failed adding labels for PR ${pr.number}: ${msg}`);
+      try {
+        core.warning(msg);
+      } catch (_) {}
+    }
+  }
+  if (reviewer) {
+    try {
+      await octo.rest.pulls.requestReviewers({ owner, repo, pull_number: pr.number, reviewers: [reviewer] });
+      logger.info(`Requested review from ${reviewer} for PR ${pr.number}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logger.warn(`Failed requesting review from ${reviewer} for PR ${pr.number}: ${msg}`);
       try {
         core.warning(msg);
       } catch (_) {}

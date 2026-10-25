@@ -176,6 +176,7 @@ async function upsertPackagePullRequest(
     base: repoInfo.defaultBranch,
     body: prBody,
     labels: inputs.githubLabels,
+    reviewer: inputs.githubReviewer,
   });
   return pr.html_url;
 }

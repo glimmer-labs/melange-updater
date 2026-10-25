@@ -30,6 +30,10 @@ inputs:
     description: 'Comma-separated labels to add to created PR.'
     required: false
     default: ''
+  github_reviewer:
+    description: 'GitHub username to request as a reviewer for created PRs.'
+    required: false
+    default: ''
   repo_path:
     description: 'Path to the checked-out repository (defaults to workspace).'
     required: false

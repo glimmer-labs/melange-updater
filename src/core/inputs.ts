@@ -10,6 +10,7 @@ export interface RuntimeInputs {
   gitAuthorEmail: string;
   repoPath: string;
   githubLabels: string[];
+  githubReviewer: string;
 }
 
 export function parseBooleanFlag(value: unknown): boolean {
@@ -64,6 +65,12 @@ export function collectRuntimeInputs(argv: Record<string, unknown>, env: NodeJS.
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
+  const githubReviewer =
+    readString(argv['github-reviewer']) ||
+    readString(argv['github_reviewer']) ||
+    getInputValue('github_reviewer', env) ||
+    getInputValue('github-reviewer', env) ||
+    '';
 
   return {
     targetRepo,
@@ -75,6 +82,7 @@ export function collectRuntimeInputs(argv: Record<string, unknown>, env: NodeJS.
     gitAuthorEmail,
     repoPath,
     githubLabels,
+    githubReviewer,
   };
 }
 

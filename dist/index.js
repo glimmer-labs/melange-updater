@@ -33227,6 +33227,11 @@ function collectRuntimeInputs(argv, env = process.env) {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
+    const githubReviewer = readString(argv['github-reviewer']) ||
+        readString(argv['github_reviewer']) ||
+        getInputValue('github_reviewer', env) ||
+        getInputValue('github-reviewer', env) ||
+        '';
     return {
         targetRepo,
         token,
@@ -33237,6 +33242,7 @@ function collectRuntimeInputs(argv, env = process.env) {
         gitAuthorEmail,
         repoPath,
         githubLabels,
+        githubReviewer,
     };
 }
 function validateRuntimeInputs(inputs) {
@@ -33800,7 +33806,7 @@ async function createIssueForPackage({ octo, targetRepo, token, pkgName, message
         return null;
     }
 }
-async function createPullRequestWithLabels({ octo, owner, repo, title, head, base, body, labels = [] }) {
+async function createPullRequestWithLabels({ octo, owner, repo, title, head, base, body, labels = [], reviewer = '' }) {
     const { data: pr } = await octo.rest.pulls.create({ owner, repo, title, head, base, body });
     logger.info('Created PR:', pr.html_url);
     if (labels.length > 0) {
@@ -33811,6 +33817,20 @@ async function createPullRequestWithLabels({ octo, owner, repo, title, head, bas
         catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             logger.warn(`Failed adding labels for PR ${pr.number}: ${msg}`);
+            try {
+                core.warning(msg);
+            }
+            catch (_) { }
+        }
+    }
+    if (reviewer) {
+        try {
+            await octo.rest.pulls.requestReviewers({ owner, repo, pull_number: pr.number, reviewers: [reviewer] });
+            logger.info(`Requested review from ${reviewer} for PR ${pr.number}`);
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            logger.warn(`Failed requesting review from ${reviewer} for PR ${pr.number}: ${msg}`);
             try {
                 core.warning(msg);
             }
@@ -34446,6 +34466,7 @@ async function upsertPackagePullRequest(ctx, inputs, repoInfo, pkgName, update, 
         base: repoInfo.defaultBranch,
         body: prBody,
         labels: inputs.githubLabels,
+        reviewer: inputs.githubReviewer,
     });
     return pr.html_url;
 }

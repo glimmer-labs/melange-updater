@@ -17,6 +17,7 @@ describe('inputs', () => {
         token: 'token123',
         preview: true,
         'git-author-name': 'Bot',
+        'github-reviewer': 'reviewer-user',
       },
       {
         GITHUB_WORKSPACE: '/workspace',
@@ -28,6 +29,7 @@ describe('inputs', () => {
     expect(inputs.preview).toBe(true);
     expect(inputs.gitAuthorName).toBe('Bot');
     expect(inputs.repoPath).toBe('/workspace');
+    expect(inputs.githubReviewer).toBe('reviewer-user');
   });
 
   it('validates required repo/token combinations', () => {
@@ -41,6 +43,7 @@ describe('inputs', () => {
       gitAuthorEmail: 'b',
       repoPath: '.',
       githubLabels: [],
+      githubReviewer: '',
     });
 
     const missingToken = validateRuntimeInputs({
@@ -53,6 +56,7 @@ describe('inputs', () => {
       gitAuthorEmail: 'b',
       repoPath: '.',
       githubLabels: [],
+      githubReviewer: '',
     });
 
     const okInPreview = validateRuntimeInputs({
@@ -65,6 +69,7 @@ describe('inputs', () => {
       gitAuthorEmail: 'b',
       repoPath: '.',
       githubLabels: [],
+      githubReviewer: '',
     });
 
     expect(missingRepo).toContain('No target repo specified');

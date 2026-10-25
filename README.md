@@ -23,6 +23,7 @@ Inputs (JavaScript action)
 - `release_monitor_token` (optional): token for Release Monitor
 - `git_author_name` / `git_author_email` (required): author info for commits
 - `github_labels` (optional): comma-separated labels for created PRs
+- `github_reviewer` (optional): GitHub username to request as a reviewer for created PRs
 - `repo_path` (optional): path to the checked-out repository; defaults to `GITHUB_WORKSPACE`
 
 Behavior
@@ -49,6 +50,7 @@ jobs:
 					git_author_name: CI Bot
 					git_author_email: ci@example.com
 					github_labels: 'request-version-update,automated pr'
+					github_reviewer: octo-reviewer # optional
 					preview: 'true'        # optional: apply locally only (no branch/commit/push/PR)
 #					dry_run: 'true'        # optional: report only; no file changes
 ```
